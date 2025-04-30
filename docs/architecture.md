@@ -1,0 +1,3 @@
+```mermaid
+<ARCHITECTURE DIAGRAM PLACEHOLDER>
+```
