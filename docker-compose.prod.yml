@@ -1,0 +1,5 @@
+services:
+  gateway:
+    environment:
+      - AUTH_DISABLED=${AUTH_DISABLED:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}

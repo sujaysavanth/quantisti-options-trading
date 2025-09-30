@@ -8,7 +8,7 @@ This guide outlines how to set up the Quantisti options trading backend services
 - A POSIX-compatible shell (for helper scripts)
 
 ## Local Development
-1. Copy `.env.example` to `.env` and populate values when available.
+1. Copy `.env.example` to `.env` and populate values when available, or supply values through the provided environment-specific files.
 2. Build and start the services:
    ```bash
    ./scripts/dev_up.sh
@@ -19,6 +19,16 @@ This guide outlines how to set up the Quantisti options trading backend services
    ```bash
    ./scripts/dev_down.sh
    ```
+
+### Running the stack with Docker Compose
+- **Development mode (auth bypass enabled):**
+  ```bash
+  docker compose --env-file .env.development up --build
+  ```
+- **Production-like mode (auth enforced):**
+  ```bash
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env.production up --build
+  ```
 
 ## Service Endpoints
 The default port assignments are:
