@@ -1,0 +1,16 @@
+[project]
+name = "portfolio"
+version = "0.1.0"
+description = "Portfolio management service for the Quantisti options trading platform"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]

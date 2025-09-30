@@ -1,0 +1,37 @@
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy"
+        required: true
+        default: "gateway"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        # TODO: Ensure the deployment workflow uses the appropriate commit.
+
+      - name: Set up gcloud SDK
+        run: |
+          echo "TODO: Install and authenticate gcloud CLI"
+        # TODO: Replace with actions for Google Cloud authentication.
+
+      - name: Configure Google Cloud project
+        run: |
+          echo "TODO: Set gcloud project and region"
+        # TODO: Add gcloud commands to set project and region.
+
+      - name: Build and push container image
+        run: |
+          echo "TODO: Build and push image for ${{ github.event.inputs.service }}"
+        # TODO: Integrate with Artifact Registry build process.
+
+      - name: Deploy service to Cloud Run
+        run: |
+          echo "TODO: Run gcloud run deploy for ${{ github.event.inputs.service }}"
+        # TODO: Execute gcloud run deploy with appropriate flags.
