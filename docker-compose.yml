@@ -1,1 +1,68 @@
 # Docker Compose config placeholder
+
+version: "3.10"
+
+services:
+  gateway:
+    build: ./services/gateway
+    environment:
+      - PORT=8080
+      - FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID:-}
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - market
+      - simulator
+      - portfolio
+      - stats
+      - ml
+      - explain
+
+  market:
+    build: ./services/market
+    environment:
+      - PORT=8081
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8081:8081"
+
+  simulator:
+    build: ./services/simulator
+    environment:
+      - PORT=8082
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8082:8082"
+
+  portfolio:
+    build: ./services/portfolio
+    environment:
+      - PORT=8083
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8083:8083"
+
+  stats:
+    build: ./services/stats
+    environment:
+      - PORT=8084
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8084:8084"
+
+  ml:
+    build: ./services/ml
+    environment:
+      - PORT=8085
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8085:8085"
+
+  explain:
+    build: ./services/explain
+    environment:
+      - PORT=8086
+      - DATABASE_URL=${DATABASE_URL:-}
+    ports:
+      - "8086:8086"
