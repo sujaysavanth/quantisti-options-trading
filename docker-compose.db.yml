@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: quantisti-postgres
+    environment:
+      POSTGRES_USER: quantisti
+      POSTGRES_PASSWORD: quantisti
+      POSTGRES_DB: quantisti
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
