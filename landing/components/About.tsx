@@ -65,7 +65,7 @@ export function About() {
               </p>
 
               <p className="text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
-                Whether you're a retail trader learning the ropes or a quant building complex strategies,
+                Whether you&apos;re a retail trader learning the ropes or a quant building complex strategies,
                 Quantisti provides the tools, data, and insights you need to trade with confidence.
               </p>
             </div>
@@ -79,7 +79,7 @@ export function About() {
                 <div>
                   <h4 className="font-semibold text-slate-900 dark:text-white">Transparency First</h4>
                   <p className="text-slate-600 dark:text-slate-400">
-                    Every ML prediction comes with SHAP explanations so you understand the "why"
+                    Every ML prediction comes with SHAP explanations so you understand the &ldquo;why&rdquo;
                   </p>
                 </div>
               </div>
