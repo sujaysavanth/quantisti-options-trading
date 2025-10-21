@@ -10,7 +10,7 @@ $baseUrl = "http://localhost:8081"
 # Test 1: Health Check
 Write-Host "Test 1: Health Check" -ForegroundColor Yellow
 try {
-    $response = Invoke-RestMethod -Uri "$baseUrl/health" -Method Get
+    $response = Invoke-RestMethod -Uri "$baseUrl/health/healthz" -Method Get
     Write-Host "✅ Health check passed" -ForegroundColor Green
     Write-Host ($response | ConvertTo-Json -Depth 3)
     Write-Host ""
@@ -78,9 +78,10 @@ Write-Host "Test 6: Get Specific Strike (ATM)" -ForegroundColor Yellow
 try {
     # First get the spot price to calculate ATM strike
     $spotResponse = Invoke-RestMethod -Uri "$baseUrl/v1/nifty/spot" -Method Get
-    $spotPrice = $spotResponse.close
+    $spotPrice = $spotResponse.price  # Changed from .close to .price
     $atmStrike = [Math]::Round($spotPrice / 50) * 50  # Round to nearest 50
 
+    Write-Host "Spot Price: $spotPrice, ATM Strike: $atmStrike" -ForegroundColor Cyan
     $response = Invoke-RestMethod -Uri "$baseUrl/v1/options/chain/strikes/$atmStrike" -Method Get
     Write-Host "✅ Strike $atmStrike options retrieved" -ForegroundColor Green
     Write-Host ($response | ConvertTo-Json -Depth 3)
