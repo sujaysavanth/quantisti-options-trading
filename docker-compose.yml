@@ -3,6 +3,23 @@
 version: "3.10"
 
 services:
+  postgres:
+    image: postgres:16
+    container_name: quantisti-postgres
+    environment:
+      - POSTGRES_USER=quantisti
+      - POSTGRES_PASSWORD=quantisti
+      - POSTGRES_DB=quantisti
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quantisti"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   gateway:
     build: ./services/gateway
     environment:
@@ -23,9 +40,12 @@ services:
     build: ./services/market
     environment:
       - PORT=8081
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
     ports:
       - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   simulator:
     build: ./services/simulator
@@ -66,3 +86,6 @@ services:
       - DATABASE_URL=${DATABASE_URL:-}
     ports:
       - "8086:8086"
+
+volumes:
+  postgres_data:
