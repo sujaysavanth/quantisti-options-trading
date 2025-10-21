@@ -69,7 +69,7 @@ def download_nifty_data(start_date: str, end_date: str) -> pd.DataFrame:
     ticker = "^NSEI"
 
     try:
-        df = yf.download(ticker, start=start_date, end=end_date, progress=True)
+        df = yf.download(ticker, start=start_date, end=end_date, progress=True, auto_adjust=False)
 
         if df.empty:
             raise ValueError("No data downloaded. Check date range and internet connection.")
@@ -77,11 +77,16 @@ def download_nifty_data(start_date: str, end_date: str) -> pd.DataFrame:
         # Reset index to make Date a column
         df.reset_index(inplace=True)
 
-        # Rename columns to match our schema
-        df.columns = ['date', 'open', 'high', 'low', 'close', 'adj_close', 'volume']
+        # Standardize column names (handle different yfinance versions)
+        df.columns = df.columns.str.lower().str.strip()
 
-        # Drop adj_close as we don't need it
-        df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
+        # Select only the columns we need (handle if Capital Gains or other columns exist)
+        required_cols = ['date', 'open', 'high', 'low', 'close', 'volume']
+        df = df[[col for col in required_cols if col in df.columns]]
+
+        # Verify we have all required columns
+        if len(df.columns) < 6:
+            raise ValueError(f"Missing columns. Got: {df.columns.tolist()}")
 
         # Calculate historical volatility for each row
         print("Calculating historical volatility...")
