@@ -4,7 +4,7 @@ import logging
 from datetime import date, datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Path
 from fastapi.responses import JSONResponse
 
 from ..models.market_data import NiftyHistoricalResponse, NiftySpotResponse, HistoricalDataQuery
@@ -114,7 +114,7 @@ async def get_historical_data(
 
 @router.get("/candles/{period}", summary="Get Nifty candles for predefined period")
 async def get_candles_by_period(
-    period: str = Query(..., regex="^(1d|1w|1m|3m|6m|1y|5y)$", description="Time period")
+    period: str = Path(..., pattern="^(1d|1w|1m|3m|6m|1y|5y)$", description="Time period")
 ):
     """Get historical candles for a predefined period.
 
