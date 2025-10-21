@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from typing import List, Optional, Dict, Any
 
 import psycopg2
+from psycopg2.extras import RealDictCursor
 
 from ..db.connection import get_db_connection, return_db_connection
 from ..models.market_data import CandleData
@@ -41,7 +42,7 @@ class DataProvider:
         conn = None
         try:
             conn = get_db_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             query = """
                 SELECT date, open, high, low, close, volume, historical_volatility
@@ -73,7 +74,7 @@ class DataProvider:
         conn = None
         try:
             conn = get_db_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             query = """
                 SELECT date, close as price, volume, historical_volatility
@@ -107,7 +108,7 @@ class DataProvider:
         conn = None
         try:
             conn = get_db_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             query = """
                 SELECT close
@@ -140,7 +141,7 @@ class DataProvider:
         conn = None
         try:
             conn = get_db_connection()
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
 
             query = """
                 SELECT historical_volatility
