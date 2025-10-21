@@ -130,9 +130,9 @@ class OptionChainResponse(BaseModel):
 class OptionChainQuery(BaseModel):
     """Query parameters for option chain."""
 
-    date: Optional[date] = Field(default=None, description="Date for historical option chain. If None, uses latest.")
-    expiry_date: Optional[date] = Field(default=None, description="Expiry date. If None, uses nearest expiry.")
-    strike_range: Optional[int] = Field(default=10, ge=1, le=50, description="Number of strikes above/below ATM")
+    date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    strike_range: int = 10
 
     @field_validator('date')
     @classmethod
