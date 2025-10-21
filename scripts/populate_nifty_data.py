@@ -77,16 +77,38 @@ def download_nifty_data(start_date: str, end_date: str) -> pd.DataFrame:
         # Reset index to make Date a column
         df.reset_index(inplace=True)
 
-        # Standardize column names (handle different yfinance versions)
-        df.columns = df.columns.str.lower().str.strip()
+        # Handle MultiIndex columns (new yfinance behavior)
+        if isinstance(df.columns, pd.MultiIndex):
+            # Flatten MultiIndex - take just the first level
+            df.columns = df.columns.get_level_values(0)
 
-        # Select only the columns we need (handle if Capital Gains or other columns exist)
+        # Standardize column names to lowercase
+        df.columns = [col.lower().strip() if isinstance(col, str) else str(col).lower().strip()
+                      for col in df.columns]
+
+        # Map columns to our expected names
+        column_mapping = {
+            'date': 'date',
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volume': 'volume',
+            'adj close': 'adj_close'  # Handle 'Adj Close' if present
+        }
+
+        # Rename columns that exist
+        df = df.rename(columns=column_mapping)
+
+        # Select only the columns we need
         required_cols = ['date', 'open', 'high', 'low', 'close', 'volume']
-        df = df[[col for col in required_cols if col in df.columns]]
 
-        # Verify we have all required columns
-        if len(df.columns) < 6:
-            raise ValueError(f"Missing columns. Got: {df.columns.tolist()}")
+        # Verify all required columns exist
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}. Available: {df.columns.tolist()}")
+
+        df = df[required_cols]
 
         # Calculate historical volatility for each row
         print("Calculating historical volatility...")
