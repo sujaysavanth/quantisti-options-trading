@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Path
 
 from ..models.options import OptionChainResponse, OptionChainQuery
 from ..services.data_provider import DataProvider
@@ -75,7 +75,7 @@ async def get_option_chain(
 
 @router.get("/chain/strikes/{strike}", summary="Get options for specific strike")
 async def get_options_by_strike(
-    strike: float = Query(..., gt=0, description="Strike price"),
+    strike: float = Path(..., gt=0, description="Strike price"),
     date_param: Optional[date] = Query(None, alias="date", description="Date for option data"),
     expiry_date: Optional[date] = Query(None, description="Option expiry date")
 ):
