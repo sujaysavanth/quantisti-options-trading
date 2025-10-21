@@ -56,7 +56,21 @@ class DataProvider:
 
             cursor.close()
 
-            return [CandleData(**row) for row in rows]
+            # Convert Decimal to float for each row
+            candles = []
+            for row in rows:
+                candle_dict = {
+                    'date': row['date'],
+                    'open': float(row['open']),
+                    'high': float(row['high']),
+                    'low': float(row['low']),
+                    'close': float(row['close']),
+                    'volume': int(row['volume']),
+                    'historical_volatility': float(row['historical_volatility']) if row['historical_volatility'] else None
+                }
+                candles.append(CandleData(**candle_dict))
+
+            return candles
 
         except Exception as e:
             logger.error(f"Error fetching historical data: {e}")
@@ -87,7 +101,15 @@ class DataProvider:
             row = cursor.fetchone()
             cursor.close()
 
-            return dict(row) if row else None
+            if row:
+                # Convert Decimal to float for numeric operations
+                return {
+                    'date': row['date'],
+                    'price': float(row['price']),
+                    'volume': int(row['volume']),
+                    'historical_volatility': float(row['historical_volatility']) if row['historical_volatility'] else None
+                }
+            return None
 
         except Exception as e:
             logger.error(f"Error fetching latest spot price: {e}")
@@ -120,7 +142,7 @@ class DataProvider:
             row = cursor.fetchone()
             cursor.close()
 
-            return row['close'] if row else None
+            return float(row['close']) if row else None
 
         except Exception as e:
             logger.error(f"Error fetching spot price for date {target_date}: {e}")
@@ -154,7 +176,7 @@ class DataProvider:
             cursor.close()
 
             if row and row['historical_volatility']:
-                return row['historical_volatility']
+                return float(row['historical_volatility'])
             else:
                 # Default volatility if not available
                 return 0.15  # 15% default
