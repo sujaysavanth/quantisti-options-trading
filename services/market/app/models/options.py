@@ -42,9 +42,9 @@ class OptionData(BaseModel):
     expiry_date: date
 
     # Pricing
-    price: Optional[float] = Field(None, gt=0, description="Option premium")
-    bid: Optional[float] = Field(None, gt=0, description="Bid price")
-    ask: Optional[float] = Field(None, gt=0, description="Ask price")
+    price: Optional[float] = Field(None, ge=0, description="Option premium")
+    bid: Optional[float] = Field(None, ge=0, description="Bid price")
+    ask: Optional[float] = Field(None, ge=0, description="Ask price")
 
     # Greeks
     greeks: Optional[Greeks] = None
