@@ -5,7 +5,7 @@ from typing import Optional
 
 import psycopg2
 from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, register_uuid
 
 from ..config import get_settings
 
@@ -68,6 +68,10 @@ def initialize_pool(min_conn: int = 1, max_conn: int = 10):
             settings.DATABASE_URL
         )
         logger.info(f"Database connection pool initialized (min={min_conn}, max={max_conn})")
+
+        # Register UUID adapter for psycopg2
+        register_uuid()
+        logger.info("UUID adapter registered for PostgreSQL")
 
         # Test connection
         conn = get_db_connection()
