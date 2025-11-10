@@ -51,9 +51,15 @@ services:
     build: ./services/simulator
     environment:
       - PORT=8082
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
+      - MARKET_SERVICE_URL=http://market:8081
     ports:
       - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      market:
+        condition: service_started
 
   portfolio:
     build: ./services/portfolio
