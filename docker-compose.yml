@@ -81,9 +81,13 @@ services:
     build: ./services/ml
     environment:
       - PORT=8085
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
+      - MARKET_SERVICE_URL=http://market:8081
     ports:
       - "8085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   explain:
     build: ./services/explain
