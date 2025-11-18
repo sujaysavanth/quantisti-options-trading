@@ -1,10 +1,11 @@
 """Feature computation and storage service."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional
 import pandas as pd
 from psycopg2.extras import RealDictCursor
+import json
 
 from ..db.connection import get_db_connection, return_db_connection
 from ..calculators.price_calculator import PriceFeatureCalculator
@@ -40,46 +41,60 @@ class FeatureService:
             WeeklyFeatures object with all computed features
         """
         try:
-            # TODO: Fetch market data from market service
-            # For now, this is a placeholder - you'll need to implement
-            # based on your market service API
-
-            # Placeholder: Create dummy dataframe
-            # In production, fetch actual data from market_client
             logger.info(f"Computing features for {symbol} week starting {week_start_date}")
 
-            # market_data = await self.market_client.fetch_historical_data(
-            #     symbol=symbol,
-            #     start_date=week_start_date - timedelta(days=60),  # Get extra data for indicators
-            #     end_date=week_start_date + timedelta(days=5)
-            # )
+            # Convert datetime to date
+            week_start = week_start_date.date() if isinstance(week_start_date, datetime) else week_start_date
 
-            # TODO: Convert market_data to pandas DataFrame
-            # df = pd.DataFrame(market_data)
+            # Fetch market data with lookback for indicator calculation
+            market_data = await self.market_client.fetch_data_with_lookback(
+                symbol=symbol,
+                week_start=week_start,
+                lookback_days=60  # 60 days should cover 50-day MA and other indicators
+            )
 
-            # For now, return None as placeholder
-            # Once you have actual market data, uncomment below:
+            if not market_data:
+                logger.error(f"No market data returned for {symbol} week {week_start}")
+                return None
 
-            # price_features = PriceFeatures(**self.price_calc.calculate_all(df))
-            # technical_features = TechnicalIndicators(**self.technical_calc.calculate_all(df))
-            # volatility_features = VolatilityFeatures(**self.volatility_calc.calculate_all(df))
+            if len(market_data) == 0:
+                logger.error(f"Empty market data for {symbol} week {week_start}")
+                return None
 
-            # features = WeeklyFeatures(
-            #     week_start_date=week_start_date,
-            #     symbol=symbol,
-            #     price_features=price_features,
-            #     technical_indicators=technical_features,
-            #     volatility_features=volatility_features,
-            #     created_at=datetime.utcnow()
-            # )
+            # Convert to pandas DataFrame
+            df = pd.DataFrame(market_data)
 
-            # return features
+            # Ensure numeric columns
+            df['open'] = pd.to_numeric(df['open'], errors='coerce')
+            df['high'] = pd.to_numeric(df['high'], errors='coerce')
+            df['low'] = pd.to_numeric(df['low'], errors='coerce')
+            df['close'] = pd.to_numeric(df['close'], errors='coerce')
+            df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
 
-            logger.warning("Feature computation not fully implemented - market data integration needed")
-            return None
+            # Sort by date
+            df = df.sort_values('date')
+
+            logger.info(f"Computing features from {len(df)} candles")
+
+            # Compute all features
+            price_features = PriceFeatures(**self.price_calc.calculate_all(df))
+            technical_features = TechnicalIndicators(**self.technical_calc.calculate_all(df))
+            volatility_features = VolatilityFeatures(**self.volatility_calc.calculate_all(df))
+
+            features = WeeklyFeatures(
+                week_start_date=week_start_date,
+                symbol=symbol,
+                price_features=price_features,
+                technical_indicators=technical_features,
+                volatility_features=volatility_features,
+                created_at=datetime.utcnow()
+            )
+
+            logger.info(f"Successfully computed features for {symbol} week {week_start}")
+            return features
 
         except Exception as e:
-            logger.error(f"Error computing features: {e}")
+            logger.error(f"Error computing features: {e}", exc_info=True)
             return None
 
     def save_features(self, features: WeeklyFeatures) -> bool:
@@ -96,36 +111,65 @@ class FeatureService:
             conn = get_db_connection()
             cursor = conn.cursor()
 
-            # TODO: Implement database insertion
-            # This requires creating the weekly_features table first
-            # See database migration guide
+            # Extract feature values
+            week_start = features.week_start_date.date() if isinstance(features.week_start_date, datetime) else features.week_start_date
 
-            # Placeholder query
-            # cursor.execute(
-            #     """
-            #     INSERT INTO weekly_features
-            #     (week_start_date, symbol, price_features, technical_indicators, volatility_features)
-            #     VALUES (%s, %s, %s, %s, %s)
-            #     ON CONFLICT (week_start_date, symbol)
-            #     DO UPDATE SET
-            #         price_features = EXCLUDED.price_features,
-            #         technical_indicators = EXCLUDED.technical_indicators,
-            #         volatility_features = EXCLUDED.volatility_features,
-            #         updated_at = NOW()
-            #     """,
-            #     (features.week_start_date, features.symbol, ...)
-            # )
+            # Price features
+            price = features.price_features
+            weekly_change_pct = price.weekly_change_pct if price else None
+            weekly_high_low_range_pct = price.weekly_high_low_range_pct if price else None
+            volume_ratio = price.volume_ratio if price else None
 
-            # conn.commit()
-            # cursor.close()
+            # Technical indicators
+            tech = features.technical_indicators
+            rsi_14 = tech.rsi_14 if tech else None
+            macd = tech.macd if tech else None
+            macd_signal = tech.macd_signal if tech else None
+            bb_width = tech.bb_width if tech else None
 
-            logger.warning("Feature saving not fully implemented - database schema needed")
-            return False
+            # Volatility features
+            vol = features.volatility_features
+            historical_vol_10d = vol.historical_vol_10d if vol else None
+            historical_vol_20d = vol.historical_vol_20d if vol else None
+            atr_14 = vol.atr_14 if vol else None
+
+            # Insert or update features
+            cursor.execute(
+                """
+                INSERT INTO weekly_features
+                (week_start_date, symbol, weekly_change_pct, weekly_high_low_range_pct, volume_ratio,
+                 rsi_14, macd, macd_signal, bb_width, historical_vol_10d, historical_vol_20d, atr_14,
+                 created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                ON CONFLICT (week_start_date, symbol)
+                DO UPDATE SET
+                    weekly_change_pct = EXCLUDED.weekly_change_pct,
+                    weekly_high_low_range_pct = EXCLUDED.weekly_high_low_range_pct,
+                    volume_ratio = EXCLUDED.volume_ratio,
+                    rsi_14 = EXCLUDED.rsi_14,
+                    macd = EXCLUDED.macd,
+                    macd_signal = EXCLUDED.macd_signal,
+                    bb_width = EXCLUDED.bb_width,
+                    historical_vol_10d = EXCLUDED.historical_vol_10d,
+                    historical_vol_20d = EXCLUDED.historical_vol_20d,
+                    atr_14 = EXCLUDED.atr_14,
+                    updated_at = NOW()
+                """,
+                (week_start, features.symbol, weekly_change_pct, weekly_high_low_range_pct,
+                 volume_ratio, rsi_14, macd, macd_signal, bb_width,
+                 historical_vol_10d, historical_vol_20d, atr_14)
+            )
+
+            conn.commit()
+            cursor.close()
+
+            logger.info(f"Saved features for {features.symbol} week {week_start}")
+            return True
 
         except Exception as e:
             if conn:
                 conn.rollback()
-            logger.error(f"Error saving features: {e}")
+            logger.error(f"Error saving features: {e}", exc_info=True)
             return False
 
         finally:
@@ -151,21 +195,124 @@ class FeatureService:
             conn = get_db_connection()
             cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-            # TODO: Implement database retrieval
-            # cursor.execute(
-            #     "SELECT * FROM weekly_features WHERE symbol = %s AND week_start_date = %s",
-            #     (symbol, week_start_date)
-            # )
-            # result = cursor.fetchone()
+            # Convert datetime to date
+            week_start = week_start_date.date() if isinstance(week_start_date, datetime) else week_start_date
 
-            # if result:
-            #     return WeeklyFeatures(**dict(result))
+            cursor.execute(
+                "SELECT * FROM weekly_features WHERE symbol = %s AND week_start_date = %s",
+                (symbol, week_start)
+            )
+            result = cursor.fetchone()
 
-            logger.warning("Feature retrieval not fully implemented - database schema needed")
-            return None
+            cursor.close()
+
+            if not result:
+                logger.info(f"No features found for {symbol} week {week_start}")
+                return None
+
+            # Reconstruct feature objects
+            price_features = PriceFeatures(
+                weekly_change_pct=result['weekly_change_pct'],
+                weekly_high_low_range_pct=result['weekly_high_low_range_pct'],
+                volume_ratio=result['volume_ratio']
+            )
+
+            technical_features = TechnicalIndicators(
+                rsi_14=result['rsi_14'],
+                macd=result['macd'],
+                macd_signal=result['macd_signal'],
+                bb_width=result['bb_width']
+            )
+
+            volatility_features = VolatilityFeatures(
+                historical_vol_10d=result['historical_vol_10d'],
+                historical_vol_20d=result['historical_vol_20d'],
+                atr_14=result['atr_14']
+            )
+
+            features = WeeklyFeatures(
+                week_start_date=result['week_start_date'],
+                symbol=result['symbol'],
+                price_features=price_features,
+                technical_indicators=technical_features,
+                volatility_features=volatility_features,
+                created_at=result['created_at']
+            )
+
+            logger.info(f"Retrieved features for {symbol} week {week_start}")
+            return features
 
         except Exception as e:
-            logger.error(f"Error retrieving features: {e}")
+            logger.error(f"Error retrieving features: {e}", exc_info=True)
+            return None
+
+        finally:
+            if conn:
+                return_db_connection(conn)
+
+    def get_latest_features(self, symbol: str) -> Optional[WeeklyFeatures]:
+        """Get most recent features for a symbol.
+
+        Args:
+            symbol: Underlying symbol
+
+        Returns:
+            Latest WeeklyFeatures or None
+        """
+        conn = None
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+            cursor.execute(
+                """
+                SELECT * FROM weekly_features
+                WHERE symbol = %s
+                ORDER BY week_start_date DESC
+                LIMIT 1
+                """,
+                (symbol,)
+            )
+            result = cursor.fetchone()
+
+            cursor.close()
+
+            if not result:
+                return None
+
+            # Reconstruct feature objects (same as get_features)
+            price_features = PriceFeatures(
+                weekly_change_pct=result['weekly_change_pct'],
+                weekly_high_low_range_pct=result['weekly_high_low_range_pct'],
+                volume_ratio=result['volume_ratio']
+            )
+
+            technical_features = TechnicalIndicators(
+                rsi_14=result['rsi_14'],
+                macd=result['macd'],
+                macd_signal=result['macd_signal'],
+                bb_width=result['bb_width']
+            )
+
+            volatility_features = VolatilityFeatures(
+                historical_vol_10d=result['historical_vol_10d'],
+                historical_vol_20d=result['historical_vol_20d'],
+                atr_14=result['atr_14']
+            )
+
+            features = WeeklyFeatures(
+                week_start_date=result['week_start_date'],
+                symbol=result['symbol'],
+                price_features=price_features,
+                technical_indicators=technical_features,
+                volatility_features=volatility_features,
+                created_at=result['created_at']
+            )
+
+            return features
+
+        except Exception as e:
+            logger.error(f"Error retrieving latest features: {e}", exc_info=True)
             return None
 
         finally:

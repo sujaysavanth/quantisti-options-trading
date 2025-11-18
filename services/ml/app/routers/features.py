@@ -1,10 +1,10 @@
 """Feature computation and retrieval endpoints."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from ..models.features import (
     FeatureComputeRequest,
     FeatureResponse,
@@ -53,11 +53,14 @@ async def compute_features(request: FeatureComputeRequest):
         if not features:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to compute features. Check market data availability."
+                detail="Failed to compute features. Check market data availability and logs."
             )
 
         # Save to database
-        feature_service.save_features(features)
+        saved = feature_service.save_features(features)
+
+        if not saved:
+            logger.warning("Features computed but failed to save to database")
 
         return FeatureResponse(
             features=features,
@@ -67,8 +70,8 @@ async def compute_features(request: FeatureComputeRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in compute_features: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Error in compute_features: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.get("/weekly/{symbol}/{date}",
@@ -93,7 +96,7 @@ async def get_weekly_features(
         if not features:
             raise HTTPException(
                 status_code=404,
-                detail=f"Features not found for {symbol} on {date}. Try computing them first."
+                detail=f"Features not found for {symbol} on {date}. Try computing them first with POST /v1/features/compute"
             )
 
         return FeatureResponse(
@@ -104,7 +107,7 @@ async def get_weekly_features(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting features: {e}")
+        logger.error(f"Error getting features: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -121,49 +124,129 @@ async def get_latest_features(symbol: str):
         Latest features
     """
     try:
-        # TODO: Implement get_latest_features in service
-        # features = feature_service.get_latest_features(symbol)
+        features = feature_service.get_latest_features(symbol)
 
-        raise HTTPException(
-            status_code=501,
-            detail="Not implemented yet. Use /weekly/{symbol}/{date} endpoint."
+        if not features:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No features found for {symbol}. Compute some features first."
+            )
+
+        return FeatureResponse(
+            features=features,
+            message="Latest features retrieved successfully"
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting latest features: {e}")
+        logger.error(f"Error getting latest features: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/backfill",
             summary="Backfill historical features")
 async def backfill_features(
-    symbol: str = Query(..., description="Symbol to backfill"),
+    background_tasks: BackgroundTasks,
+    symbol: str = Query("NIFTY", description="Symbol to backfill"),
     start_date: datetime = Query(..., description="Start date"),
-    end_date: datetime = Query(..., description="End date")
+    end_date: datetime = Query(..., description="End date"),
+    interval_days: int = Query(7, description="Interval in days (default 7 for weekly)")
 ):
     """Compute features for a date range (backfill historical data).
+
+    This runs in the background and computes features for each week in the range.
 
     Args:
         symbol: Underlying symbol
         start_date: Start date
         end_date: End date
+        interval_days: Days between feature computations (7 for weekly)
 
     Returns:
         Status message
     """
     try:
-        # TODO: Implement backfill logic
-        # This should iterate through weeks and compute features for each
+        # Validate dates
+        if end_date < start_date:
+            raise HTTPException(
+                status_code=400,
+                detail="end_date must be after start_date"
+            )
 
-        raise HTTPException(
-            status_code=501,
-            detail="Backfill not implemented yet. This will be used for training data generation."
+        # Calculate number of weeks
+        days_diff = (end_date.date() - start_date.date()).days
+        num_weeks = days_diff // interval_days
+
+        if num_weeks > 260:  # ~5 years of weekly data
+            raise HTTPException(
+                status_code=400,
+                detail="Date range too large. Maximum 260 weeks (~5 years)."
+            )
+
+        # Add backfill task to background
+        background_tasks.add_task(
+            run_backfill,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval_days=interval_days
         )
+
+        return {
+            "status": "started",
+            "message": f"Backfill started for {symbol} from {start_date.date()} to {end_date.date()}",
+            "estimated_weeks": num_weeks,
+            "note": "Check logs for progress. Features will be available as they're computed."
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in backfill: {e}")
+        logger.error(f"Error in backfill: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+async def run_backfill(symbol: str, start_date: datetime, end_date: datetime, interval_days: int = 7):
+    """Background task to backfill features.
+
+    Args:
+        symbol: Symbol to backfill
+        start_date: Start date
+        end_date: End date
+        interval_days: Days between computations
+    """
+    logger.info(f"Starting backfill for {symbol} from {start_date} to {end_date}")
+
+    current_date = start_date
+    success_count = 0
+    failure_count = 0
+
+    while current_date <= end_date:
+        try:
+            logger.info(f"Computing features for {symbol} week {current_date.date()}")
+
+            # Compute features
+            features = await feature_service.compute_weekly_features(symbol, current_date)
+
+            if features:
+                # Save features
+                saved = feature_service.save_features(features)
+                if saved:
+                    success_count += 1
+                    logger.info(f"✓ Saved features for {current_date.date()}")
+                else:
+                    failure_count += 1
+                    logger.error(f"✗ Failed to save features for {current_date.date()}")
+            else:
+                failure_count += 1
+                logger.error(f"✗ Failed to compute features for {current_date.date()}")
+
+        except Exception as e:
+            failure_count += 1
+            logger.error(f"Error processing {current_date.date()}: {e}")
+
+        # Move to next interval
+        current_date = current_date + timedelta(days=interval_days)
+
+    logger.info(f"Backfill complete: {success_count} succeeded, {failure_count} failed")
