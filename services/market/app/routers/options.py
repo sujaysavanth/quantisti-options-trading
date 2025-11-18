@@ -18,7 +18,7 @@ data_provider = DataProvider()
 @router.get("/chain", response_model=OptionChainResponse, summary="Get Nifty option chain")
 async def get_option_chain(
     date_param: Optional[date] = Query(None, alias="date", description="Date for option chain (YYYY-MM-DD). If None, uses latest available date"),
-    expiry_date: Optional[date] = Query(None, description="Option expiry date (YYYY-MM-DD). If None, uses next monthly expiry"),
+    expiry_date: Optional[date] = Query(None, description="Option expiry date (YYYY-MM-DD). If None, uses next weekly expiry (Tuesday)"),
     strike_range: int = Query(10, ge=1, le=50, description="Number of strikes above/below ATM to include")
 ):
     """Get Nifty option chain with calculated prices and Greeks.
@@ -32,7 +32,7 @@ async def get_option_chain(
 
     Args:
         date_param: Date for which to generate option chain. Defaults to latest available.
-        expiry_date: Option expiry date. Defaults to next monthly expiry (last Thursday).
+        expiry_date: Option expiry date. Defaults to next weekly expiry (Tuesday).
         strike_range: Number of strike prices to include above and below ATM strike.
 
     Returns:
@@ -131,7 +131,7 @@ async def get_available_expiries(
 ):
     """Get list of available option expiry dates.
 
-    For Nifty options, this returns the monthly expiry dates (last Thursday of each month)
+    For Nifty options, this returns the monthly expiry dates (last Tuesday of each month)
     for the next 3 months.
 
     Args:
@@ -149,7 +149,7 @@ async def get_available_expiries(
                 raise HTTPException(status_code=404, detail="No data available")
             current_date = spot_data['date']
 
-        # Generate next 3 monthly expiries
+        # Generate next 3 monthly expiries (last Tuesday of each month)
         expiries = []
         for i in range(3):
             # Move to next month
@@ -166,11 +166,11 @@ async def get_available_expiries(
             else:
                 last_day = date(year, month + 1, 1) - timedelta(days=1)
 
-            # Find last Thursday
-            while last_day.weekday() != 3:  # 3 = Thursday
+            # Find last Tuesday
+            while last_day.weekday() != 1:  # 1 = Tuesday
                 last_day -= timedelta(days=1)
 
-            if last_day > current_date:
+            if last_day >= current_date:
                 expiries.append({
                     "expiry_date": last_day,
                     "days_to_expiry": (last_day - current_date).days,

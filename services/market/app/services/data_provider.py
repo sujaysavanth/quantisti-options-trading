@@ -189,36 +189,20 @@ class DataProvider:
                 return_db_connection(conn)
 
     def _get_next_expiry(self, current_date: date) -> date:
-        """Calculate next monthly expiry (last Thursday of the month).
+        """Calculate next weekly expiry (Tuesday for Nifty contracts).
 
         Args:
-            current_date: Current date
+            current_date: Current trade date
 
         Returns:
-            Next expiry date
+            Next Tuesday expiry (or the same day if already Tuesday)
         """
-        # Start with last day of current month
-        if current_date.month == 12:
-            last_day = date(current_date.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            last_day = date(current_date.year, current_date.month + 1, 1) - timedelta(days=1)
-
-        # Find last Thursday
-        while last_day.weekday() != 3:  # 3 = Thursday
-            last_day -= timedelta(days=1)
-
-        # If expiry has passed, get next month's expiry
-        if last_day <= current_date:
-            if last_day.month == 12:
-                next_month = date(last_day.year + 1, 1, 1)
-            else:
-                next_month = date(last_day.year, last_day.month + 1, 1)
-
-            last_day = date(next_month.year, next_month.month + 1, 1) - timedelta(days=1)
-            while last_day.weekday() != 3:
-                last_day -= timedelta(days=1)
-
-        return last_day
+        # NSE moved Nifty weekly expiries to Tuesday (weekday=1)
+        days_until_tuesday = (1 - current_date.weekday()) % 7
+        # If we're already on Tuesday, expiry is today; otherwise move forward
+        if days_until_tuesday == 0:
+            return current_date
+        return current_date + timedelta(days=days_until_tuesday)
 
     def generate_option_chain(
         self,
@@ -230,7 +214,7 @@ class DataProvider:
 
         Args:
             target_date: Date for option chain (None = latest)
-            expiry_date: Option expiry date (None = next monthly expiry)
+            expiry_date: Option expiry date (None = next weekly expiry)
             strike_range: Number of strikes above/below ATM
 
         Returns:

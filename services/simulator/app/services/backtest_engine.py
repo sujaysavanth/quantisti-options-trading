@@ -209,7 +209,7 @@ class BacktestEngine:
             # Calculate ATM strike
             atm_strike = round(entry_spot / 50) * 50
 
-            # Calculate expiry date (next monthly expiry - last Thursday)
+            # Calculate expiry date (next weekly expiry - Tuesday)
             expiry_date = self._get_next_expiry(entry_date)
 
             # Build positions for each leg
@@ -282,29 +282,11 @@ class BacktestEngine:
             return None
 
     def _get_next_expiry(self, current_date: date) -> date:
-        """Calculate next monthly expiry (last Thursday of the month)."""
-        # Start with last day of current month
-        if current_date.month == 12:
-            last_day = date(current_date.year + 1, 1, 1) - timedelta(days=1)
-        else:
-            last_day = date(current_date.year, current_date.month + 1, 1) - timedelta(days=1)
-
-        # Find last Thursday
-        while last_day.weekday() != 3:  # 3 = Thursday
-            last_day -= timedelta(days=1)
-
-        # If expiry has passed, get next month's expiry
-        if last_day <= current_date:
-            if last_day.month == 12:
-                next_month = date(last_day.year + 1, 1, 1)
-            else:
-                next_month = date(last_day.year, last_day.month + 1, 1)
-
-            last_day = date(next_month.year, next_month.month + 1, 1) - timedelta(days=1)
-            while last_day.weekday() != 3:
-                last_day -= timedelta(days=1)
-
-        return last_day
+        """Calculate the next Nifty weekly expiry (Tuesday)."""
+        days_until_tuesday = (1 - current_date.weekday()) % 7
+        if days_until_tuesday == 0:
+            return current_date
+        return current_date + timedelta(days=days_until_tuesday)
 
     def _save_trade(
         self,

@@ -15,7 +15,7 @@ Market data service providing Nifty 50 index data and options chain with realist
 - **Option Chain Generation**: Complete call and put option chains
 - **Black-Scholes Pricing**: European options pricing for all strikes
 - **Greeks Calculation**: Delta, Gamma, Theta, Vega, Rho
-- **Expiry Management**: Auto-calculates monthly expiries (last Thursday)
+- **Expiry Management**: Auto-calculates weekly/monthly expiries (Tuesday)
 - **Database Integration**: PostgreSQL with connection pooling
 - **API Documentation**: Interactive Swagger UI at `/docs`
 
