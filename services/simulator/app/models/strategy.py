@@ -20,6 +20,17 @@ class StrategyType(str, Enum):
     BEAR_CALL_SPREAD = "BEAR_CALL_SPREAD"
     IRON_CONDOR = "IRON_CONDOR"
     IRON_BUTTERFLY = "IRON_BUTTERFLY"
+    CALL_RATIO_SPREAD = "CALL_RATIO_SPREAD"
+    PUT_RATIO_SPREAD = "PUT_RATIO_SPREAD"
+    LONG_CALL_BUTTERFLY = "LONG_CALL_BUTTERFLY"
+    LONG_PUT_BUTTERFLY = "LONG_PUT_BUTTERFLY"
+    JADE_LIZARD = "JADE_LIZARD"
+    REVERSE_JADE_LIZARD = "REVERSE_JADE_LIZARD"
+    CALL_RATIO_BACKSPREAD = "CALL_RATIO_BACKSPREAD"
+    PUT_RATIO_BACKSPREAD = "PUT_RATIO_BACKSPREAD"
+    BWB_CALL = "BWB_CALL"
+    LONG_CALENDAR_SPREAD = "LONG_CALENDAR_SPREAD"
+    LONG_DIAGONAL_SPREAD = "LONG_DIAGONAL_SPREAD"
     CUSTOM = "CUSTOM"
 
 
@@ -42,6 +53,7 @@ class StrategyLeg(BaseModel):
     strike_offset: int = Field(..., description="Strike offset from ATM in points (e.g., 0, +50, -100)")
     quantity: int = Field(..., gt=0, description="Number of lots")
     leg_order: int = Field(..., ge=1, description="Order of execution")
+    expiry_offset: int = Field(0, ge=0, description="Expiry offset in weeks (0=current, 1=next week)")
 
     model_config = {
         "json_schema_extra": {

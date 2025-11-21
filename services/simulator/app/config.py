@@ -25,6 +25,12 @@ class Settings(BaseSettings):
         "http://market:8081"
     )
 
+    # Market Stream Service for live quotes
+    MARKET_STREAM_URL: str = os.getenv(
+        "MARKET_STREAM_URL",
+        "http://market_stream:8090"
+    )
+
     # Backtest settings
     DEFAULT_INITIAL_CAPITAL: float = 100000.0  # ₹1 lakh
     DEFAULT_STRIKE_RANGE: int = 10

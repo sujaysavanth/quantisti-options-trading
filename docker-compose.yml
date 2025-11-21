@@ -97,5 +97,12 @@ services:
     ports:
       - "8086:8086"
 
+  market_stream:
+    build: ./services/market-stream
+    environment:
+      - PORT=8090
+    ports:
+      - "8090:8090"
+
 volumes:
   postgres_data:

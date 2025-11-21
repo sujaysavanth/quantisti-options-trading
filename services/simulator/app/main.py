@@ -14,7 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db.connection import initialize_pool, close_db_connection
-from .routers import health, strategies, backtests
+from .routers import backtests, health, live_strategies, paper, strategies
+from .services.paper_store import PaperTradeStore
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +46,8 @@ app.add_middleware(
 # Include routers
 app.include_router(health.router, prefix="/health")
 app.include_router(strategies.router, prefix="/v1")
+app.include_router(paper.router)
+app.include_router(live_strategies.router)
 app.include_router(backtests.router, prefix="/v1")
 
 
@@ -61,6 +64,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         # Don't crash the service - allow it to start and report errors via health check
+    app.state.paper_store = PaperTradeStore()
 
 
 @app.on_event("shutdown")

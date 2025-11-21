@@ -209,27 +209,35 @@ class BacktestEngine:
             # Calculate ATM strike
             atm_strike = round(entry_spot / 50) * 50
 
-            # Calculate expiry date (next weekly expiry - Tuesday)
-            expiry_date = self._get_next_expiry(entry_date)
-
             # Build positions for each leg
             trade_legs = []
             total_premium = 0.0
+            
+            # Determine the main expiry date for the trade (usually the first leg's expiry or nearest)
+            # We'll use the first leg's expiry as the "trade expiry" for database purposes
+            trade_expiry_date = None
 
             for leg in strategy_legs:
                 # Calculate strike based on offset
                 strike = atm_strike + leg['strike_offset']
+
+                # Calculate expiry date for this leg
+                expiry_offset = leg.get('expiry_offset', 0)
+                leg_expiry_date = self._get_expiry(entry_date, expiry_offset)
+                
+                if trade_expiry_date is None:
+                    trade_expiry_date = leg_expiry_date
 
                 # Get option price
                 option_data = await self.market_client.get_option_price(
                     strike=strike,
                     option_type=leg['option_type'],
                     target_date=entry_date,
-                    expiry_date=expiry_date
+                    expiry_date=leg_expiry_date
                 )
 
                 if not option_data:
-                    logger.warning(f"No option data for {strike} {leg['option_type']}, skipping trade")
+                    logger.warning(f"No option data for {strike} {leg['option_type']} {leg_expiry_date}, skipping trade")
                     return None
 
                 price = float(option_data['price'])
@@ -245,7 +253,7 @@ class BacktestEngine:
                     'action': leg['action'],
                     'option_type': leg['option_type'],
                     'strike': strike,
-                    'expiry_date': expiry_date,
+                    'expiry_date': leg_expiry_date,
                     'quantity': quantity,
                     'entry_price': price,
                     'entry_iv': option_data.get('implied_volatility')
@@ -256,7 +264,7 @@ class BacktestEngine:
                 backtest_id=backtest_id,
                 trade_number=trade_number,
                 entry_date=entry_date,
-                expiry_date=expiry_date,
+                expiry_date=trade_expiry_date,
                 entry_spot_price=entry_spot,
                 entry_premium=total_premium,
                 trade_legs=trade_legs
@@ -281,12 +289,21 @@ class BacktestEngine:
             logger.error(f"Error executing trade {trade_number}: {e}")
             return None
 
-    def _get_next_expiry(self, current_date: date) -> date:
-        """Calculate the next Nifty weekly expiry (Tuesday)."""
+    def _get_expiry(self, current_date: date, offset_weeks: int = 0) -> date:
+        """Calculate the Nifty weekly expiry (Tuesday) with offset."""
+        # Find the next Tuesday
         days_until_tuesday = (1 - current_date.weekday()) % 7
         if days_until_tuesday == 0:
-            return current_date
-        return current_date + timedelta(days=days_until_tuesday)
+            next_expiry = current_date
+        else:
+            next_expiry = current_date + timedelta(days=days_until_tuesday)
+        
+        # Add offset weeks
+        return next_expiry + timedelta(weeks=offset_weeks)
+
+    def _get_next_expiry(self, current_date: date) -> date:
+        """Legacy method for backward compatibility."""
+        return self._get_expiry(current_date, 0)
 
     def _save_trade(
         self,
@@ -353,10 +370,14 @@ class BacktestEngine:
         exit_date = None
         exit_reason = None
 
-        # For simplicity, exit on expiry
+        # Find the nearest expiry among all legs
+        # For Calendar spreads, we usually exit when the near leg expires
+        nearest_expiry = min(leg['expiry_date'] for leg in trade_legs)
+
+        # For simplicity, exit on nearest expiry
         # TODO: Implement daily checks for stop loss, target, max days
         if exit_logic == ExitLogic.ON_EXPIRY.value or True:  # Default to expiry for now
-            exit_date = expiry_date
+            exit_date = nearest_expiry
             exit_reason = "EXPIRY"
 
         # Get exit prices
@@ -367,21 +388,29 @@ class BacktestEngine:
         # Calculate exit premium
         exit_premium = 0.0
         for leg in trade_legs:
-            option_data = await self.market_client.get_option_price(
-                strike=leg['strike'],
-                option_type=leg['option_type'],
-                target_date=exit_date,
-                expiry_date=leg['expiry_date']
-            )
-
-            if option_data:
-                exit_price = float(option_data['price'])
-            else:
-                # At expiry, calculate intrinsic value
+            # If this leg is expiring today, use intrinsic value
+            if leg['expiry_date'] == exit_date:
                 if leg['option_type'] == 'CE':
                     exit_price = max(exit_spot - leg['strike'], 0)
                 else:  # PE
                     exit_price = max(leg['strike'] - exit_spot, 0)
+            else:
+                # If leg is NOT expiring (e.g. far leg of calendar), get market price
+                option_data = await self.market_client.get_option_price(
+                    strike=leg['strike'],
+                    option_type=leg['option_type'],
+                    target_date=exit_date,
+                    expiry_date=leg['expiry_date']
+                )
+                if option_data:
+                    exit_price = float(option_data['price'])
+                else:
+                    # Fallback if data missing (shouldn't happen for liquid Nifty)
+                    # Use Black-Scholes or intrinsic as worst case
+                    if leg['option_type'] == 'CE':
+                        exit_price = max(exit_spot - leg['strike'], 0)
+                    else:  # PE
+                        exit_price = max(leg['strike'] - exit_spot, 0)
 
             # Calculate exit premium (opposite of entry)
             if leg['action'] == 'BUY':

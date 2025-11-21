@@ -1,0 +1,18 @@
+[project]
+name = "market-stream"
+version = "0.1.0"
+description = "Streaming quote service for pushing live Nifty/option data to simulators and UIs"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
