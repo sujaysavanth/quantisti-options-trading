@@ -1,23 +1,33 @@
-import { Navbar } from '@/components/Navbar'
-import { Hero } from '@/components/Hero'
-import { Features } from '@/components/Features'
-import { HowItWorks } from '@/components/HowItWorks'
-import { Pricing } from '@/components/Pricing'
-import { About } from '@/components/About'
-import { CTA } from '@/components/CTA'
-import { Footer } from '@/components/Footer'
+import { Bento } from '@/components/sections/Bento'
+import { ChainShowcase } from '@/components/sections/ChainShowcase'
+import { FinalCta } from '@/components/sections/FinalCta'
+import { Footer } from '@/components/sections/Footer'
+import { Hero } from '@/components/sections/Hero'
+import { Nav } from '@/components/sections/Nav'
+import { PipelineScene } from '@/components/sections/PipelineScene'
+import { RangeScene } from '@/components/sections/RangeScene'
+import { RiskShowcase } from '@/components/sections/RiskShowcase'
+import { ShapShowcase } from '@/components/sections/ShapShowcase'
+import { Specs } from '@/components/sections/Specs'
+import { StrategyScene } from '@/components/sections/StrategyScene'
 
 export default function Home() {
   return (
-    <main className="min-h-screen">
-      <Navbar />
-      <Hero />
-      <Features />
-      <HowItWorks />
-      <About />
-      <Pricing />
-      <CTA />
+    <>
+      <Nav />
+      <main>
+        <Hero />
+        <RangeScene />
+        <ChainShowcase />
+        <StrategyScene />
+        <ShapShowcase />
+        <RiskShowcase />
+        <PipelineScene />
+        <Bento />
+        <Specs />
+        <FinalCta />
+      </main>
       <Footer />
-    </main>
+    </>
   )
 }
