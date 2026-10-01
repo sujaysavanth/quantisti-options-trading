@@ -15,7 +15,7 @@ router = APIRouter(prefix="/v1/strategies-live", tags=["strategies"])
 
 @router.get("/", response_model=list[StrategyInstance])
 async def get_live_strategies(
-    symbol: str = Query(default="NIFTY"),
+    symbol: str = Query(default="SPX"),
     stream_client: MarketStreamClient = Depends(get_market_stream_client)
 ):
     quote = await stream_client.get_quote(symbol)

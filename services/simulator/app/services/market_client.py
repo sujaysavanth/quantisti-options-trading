@@ -19,7 +19,7 @@ class MarketDataClient:
         self.base_url = self.settings.MARKET_SERVICE_URL
 
     async def get_spot_price(self, target_date: Optional[date] = None) -> Optional[float]:
-        """Get Nifty spot price for a specific date.
+        """Get the underlying close for a specific date.
 
         Args:
             target_date: Date to fetch price for (None = latest)
@@ -32,7 +32,7 @@ class MarketDataClient:
                 if target_date:
                     # Fetch historical data for the specific date
                     response = await client.get(
-                        f"{self.base_url}/v1/nifty/historical",
+                        f"{self.base_url}/v1/underlying/historical",
                         params={
                             "start_date": str(target_date),
                             "end_date": str(target_date)
@@ -42,7 +42,7 @@ class MarketDataClient:
                 else:
                     # Fetch latest spot price
                     response = await client.get(
-                        f"{self.base_url}/v1/nifty/spot",
+                        f"{self.base_url}/v1/underlying/spot",
                         timeout=10.0
                     )
 
@@ -112,7 +112,7 @@ class MarketDataClient:
 
         Args:
             strike: Strike price
-            option_type: CE or PE
+            option_type: C or P
             target_date: Date for option price
             expiry_date: Option expiry date
 
@@ -155,7 +155,7 @@ class MarketDataClient:
         start_date: date,
         end_date: date
     ) -> Optional[List[Dict[str, Any]]]:
-        """Get historical Nifty data.
+        """Get historical underlying candles.
 
         Args:
             start_date: Start date
@@ -167,7 +167,7 @@ class MarketDataClient:
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{self.base_url}/v1/nifty/historical",
+                    f"{self.base_url}/v1/underlying/historical",
                     params={
                         "start_date": str(start_date),
                         "end_date": str(end_date)

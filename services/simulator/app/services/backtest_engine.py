@@ -7,6 +7,7 @@ from uuid import UUID
 
 from psycopg2.extras import RealDictCursor
 
+from .. import market_spec
 from ..db.connection import get_db_connection, return_db_connection
 from ..services.market_client import MarketDataClient
 from ..models.backtest import EntryLogic, ExitLogic, TradeStatus
@@ -151,40 +152,34 @@ class BacktestEngine:
         end_date: date,
         entry_logic: str
     ) -> List[date]:
-        """Generate trade entry dates based on entry logic."""
-        dates = []
-        current_date = start_date
+        """Trade entry dates on the NYSE calendar.
+
+        DAILY: every session. WEEKLY: first session of each week. MONTHLY:
+        first session of each month. ON_DATE: the first session on or after
+        start_date.
+        """
+        sessions = market_spec.trading_days(start_date, end_date)
+        if not sessions:
+            return []
 
         if entry_logic == EntryLogic.ON_DATE.value:
-            # Single trade on start date
-            dates.append(start_date)
+            return sessions[:1]
+        if entry_logic == EntryLogic.DAILY.value:
+            return sessions
 
-        elif entry_logic == EntryLogic.DAILY.value:
-            # Daily trades
-            while current_date <= end_date:
-                # Skip weekends (assuming market is closed on Sat/Sun)
-                if current_date.weekday() < 5:  # Monday = 0, Sunday = 6
-                    dates.append(current_date)
-                current_date += timedelta(days=1)
-
-        elif entry_logic == EntryLogic.WEEKLY.value:
-            # Weekly trades (every Monday)
-            while current_date <= end_date:
-                if current_date.weekday() == 0:  # Monday
-                    dates.append(current_date)
-                current_date += timedelta(days=1)
-
+        if entry_logic == EntryLogic.WEEKLY.value:
+            key = lambda d: d.isocalendar()[:2]
         elif entry_logic == EntryLogic.MONTHLY.value:
-            # Monthly trades (first trading day of month)
-            while current_date <= end_date:
-                if current_date.day == 1 or (current_date == start_date):
-                    dates.append(current_date)
-                # Jump to next month
-                if current_date.month == 12:
-                    current_date = date(current_date.year + 1, 1, 1)
-                else:
-                    current_date = date(current_date.year, current_date.month + 1, 1)
+            key = lambda d: (d.year, d.month)
+        else:
+            raise ValueError(f"Unknown entry logic: {entry_logic}")
 
+        dates: List[date] = []
+        seen = set()
+        for d in sessions:
+            if key(d) not in seen:
+                seen.add(key(d))
+                dates.append(d)
         return dates
 
     async def _execute_trade(
@@ -206,8 +201,13 @@ class BacktestEngine:
                 logger.warning(f"No spot price for {entry_date}, skipping trade")
                 return None
 
-            # Calculate ATM strike
-            atm_strike = round(entry_spot / 50) * 50
+            atm_strike = market_spec.round_to_strike(entry_spot)
+
+            # Every leg must settle within the loaded data, otherwise the trade cannot be closed.
+            nearest_expiry = min(self._get_expiry(entry_date, leg.get('expiry_offset', 0)) for leg in strategy_legs)
+            if not await self.market_client.get_spot_price(nearest_expiry):
+                logger.info(f"No close for expiry {nearest_expiry} yet; skipping entry on {entry_date}")
+                return None
 
             # Build positions for each leg
             trade_legs = []
@@ -241,7 +241,7 @@ class BacktestEngine:
                     return None
 
                 price = float(option_data['price'])
-                quantity = int(leg['quantity']) * self.settings.NIFTY_LOT_SIZE
+                quantity = int(leg['quantity']) * self.settings.CONTRACT_MULTIPLIER
 
                 # Calculate premium (BUY = debit, SELL = credit)
                 if leg['action'] == 'BUY':
@@ -274,7 +274,7 @@ class BacktestEngine:
             exit_result = await self._simulate_exit(
                 trade_id=trade_id,
                 entry_date=entry_date,
-                expiry_date=expiry_date,
+                expiry_date=trade_expiry_date,
                 entry_premium=total_premium,
                 trade_legs=trade_legs,
                 exit_logic=exit_logic,
@@ -289,21 +289,14 @@ class BacktestEngine:
             logger.error(f"Error executing trade {trade_number}: {e}")
             return None
 
-    def _get_expiry(self, current_date: date, offset_weeks: int = 0) -> date:
-        """Calculate the Nifty weekly expiry (Tuesday) with offset."""
-        # Find the next Tuesday
-        days_until_tuesday = (1 - current_date.weekday()) % 7
-        if days_until_tuesday == 0:
-            next_expiry = current_date
-        else:
-            next_expiry = current_date + timedelta(days=days_until_tuesday)
-        
-        # Add offset weeks
-        return next_expiry + timedelta(weeks=offset_weeks)
+    def _get_expiry(self, entry_date: date, offset_weeks: int = 0) -> date:
+        """Expiry for a leg entered at the close of `entry_date`.
 
-    def _get_next_expiry(self, current_date: date) -> date:
-        """Legacy method for backward compatibility."""
-        return self._get_expiry(current_date, 0)
+        The nearest listed expiry at least one day out (a same-day expiry has
+        no time left at the close), pushed `offset_weeks` weeks further for
+        the far legs of calendar and diagonal spreads.
+        """
+        return market_spec.next_expiry(entry_date, min_dte=1 + 7 * offset_weeks)
 
     def _save_trade(
         self,
@@ -380,19 +373,19 @@ class BacktestEngine:
             exit_date = nearest_expiry
             exit_reason = "EXPIRY"
 
-        # Get exit prices
+        # SPX is cash-settled at the expiry close.
         exit_spot = await self.market_client.get_spot_price(exit_date)
         if not exit_spot:
-            exit_spot = entry_premium  # Fallback
+            raise ValueError(f"No close available for expiry {exit_date}")
 
         # Calculate exit premium
         exit_premium = 0.0
         for leg in trade_legs:
             # If this leg is expiring today, use intrinsic value
             if leg['expiry_date'] == exit_date:
-                if leg['option_type'] == 'CE':
+                if leg['option_type'] == 'C':
                     exit_price = max(exit_spot - leg['strike'], 0)
-                else:  # PE
+                else:
                     exit_price = max(leg['strike'] - exit_spot, 0)
             else:
                 # If leg is NOT expiring (e.g. far leg of calendar), get market price
@@ -405,11 +398,10 @@ class BacktestEngine:
                 if option_data:
                     exit_price = float(option_data['price'])
                 else:
-                    # Fallback if data missing (shouldn't happen for liquid Nifty)
-                    # Use Black-Scholes or intrinsic as worst case
-                    if leg['option_type'] == 'CE':
+                    # Fall back to intrinsic value if the market service cannot price the leg
+                    if leg['option_type'] == 'C':
                         exit_price = max(exit_spot - leg['strike'], 0)
-                    else:  # PE
+                    else:
                         exit_price = max(leg['strike'] - exit_spot, 0)
 
             # Calculate exit premium (opposite of entry)

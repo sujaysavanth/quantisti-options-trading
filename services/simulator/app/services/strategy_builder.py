@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from .. import market_spec
 from ..models.strategy_live import StrategyInstance, StrategyLeg
+
+# Distance between strategy strikes: 25 SPX points (~0.3%), five strikes on the 5-point grid.
+STEP = 5 * market_spec.STRIKE_STEP
 
 
 def _pick_price(leg: Dict) -> float:
@@ -49,12 +53,12 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
 
     atm_leg_call = _nearest_leg(legs_raw, "CALL", price, "closest")
     atm_leg_put = _nearest_leg(legs_raw, "PUT", price, "closest")
-    one_step_up_call = _nearest_leg(legs_raw, "CALL", price + 50, "above")
-    two_step_up_call = _nearest_leg(legs_raw, "CALL", price + 100, "above")
-    three_step_up_call = _nearest_leg(legs_raw, "CALL", price + 150, "above")
-    one_step_down_put = _nearest_leg(legs_raw, "PUT", price - 50, "below")
-    two_step_down_put = _nearest_leg(legs_raw, "PUT", price - 100, "below")
-    three_step_down_put = _nearest_leg(legs_raw, "PUT", price - 150, "below")
+    one_step_up_call = _nearest_leg(legs_raw, "CALL", price + STEP, "above")
+    two_step_up_call = _nearest_leg(legs_raw, "CALL", price + 2 * STEP, "above")
+    three_step_up_call = _nearest_leg(legs_raw, "CALL", price + 3 * STEP, "above")
+    one_step_down_put = _nearest_leg(legs_raw, "PUT", price - STEP, "below")
+    two_step_down_put = _nearest_leg(legs_raw, "PUT", price - 2 * STEP, "below")
+    three_step_down_put = _nearest_leg(legs_raw, "PUT", price - 3 * STEP, "below")
 
     # Fallback selections so we still emit ideas even if the chain is sparse
     up_for_strangle = one_step_up_call or two_step_up_call or three_step_up_call or atm_leg_call
@@ -329,7 +333,7 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
     # Call Butterfly (long)
     if one_step_down_put and atm_leg_call and one_step_up_call:
         # Re-purpose nearest strikes as evenly spaced as possible
-        lower = _nearest_leg(legs_raw, "CALL", price - 50, "below") or atm_leg_call
+        lower = _nearest_leg(legs_raw, "CALL", price - STEP, "below") or atm_leg_call
         mid = atm_leg_call
         upper = one_step_up_call
         if lower and mid and upper:
@@ -410,8 +414,8 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
     # Long Put Butterfly
     if one_step_up_call and atm_leg_put and one_step_down_put: # Using Call for upper bound check is weird, but let's stick to puts
         # We need ITM Put (higher strike), ATM Put, OTM Put (lower strike)
-        # one_step_up_call is roughly price + 50. Let's find one_step_up_put if possible, or use nearest
-        one_step_up_put = _nearest_leg(legs_raw, "PUT", price + 50, "above")
+        # one_step_up_call is roughly price + STEP. Let's find one_step_up_put if possible, or use nearest
+        one_step_up_put = _nearest_leg(legs_raw, "PUT", price + STEP, "above")
         
         upper = one_step_up_put
         mid = atm_leg_put
@@ -529,18 +533,10 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
         )
 
     # Broken Wing Butterfly (Call)
-    # Buy ATM, Sell 2x OTM (+100), Buy Far OTM (+250) -> approximated as +150 here (three_step_up)
+    # Buy ATM, sell 2x at +2 steps, buy the far wing at +4 steps or beyond. A standard
+    # fly would buy +4 steps exactly; the broken wing sits further out for a credit.
     if atm_leg_call and two_step_up_call and three_step_up_call:
-        # Using two_step (+100) as the short strikes, and three_step (+150) as the broken wing
-        # Standard fly would be +200. Here we buy +150 (tighter) or +250 (wider).
-        # Let's assume "Broken Wing" means we skip a strike for the far wing to make it cheaper/credit.
-        # So Buy ATM, Sell 2x (+100), Buy (+250).
-        # We don't have +250 easily in our variables, let's use three_step (+150) as the "wing" but maybe that's too close?
-        # Actually, BWB usually implies the far wing is FURTHER out to create a credit.
-        # If standard is 0, 100, 200. BWB is 0, 100, 250.
-        # We only have variables for up to +150.
-        # Let's try to fetch +200 or +250 dynamically.
-        far_wing = _nearest_leg(legs_raw, "CALL", price + 200, "above")
+        far_wing = _nearest_leg(legs_raw, "CALL", price + 4 * STEP, "above")
         
         if far_wing:
             debit = _pick_price(atm_leg_call) - 2 * _pick_price(two_step_up_call) + _pick_price(far_wing)

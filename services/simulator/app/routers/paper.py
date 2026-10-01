@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/paper", tags=["paper-trading"])
 
 settings = get_settings()
-LOT_SIZE = settings.NIFTY_LOT_SIZE
+MULTIPLIER = settings.CONTRACT_MULTIPLIER
 
 
 def _match_quote_leg(quote: dict, leg: PaperLegInput | StoredLeg):
@@ -62,9 +62,9 @@ def build_response(trade: StoredTrade, quote: dict) -> PaperTradeResponse:
         current_price = _price_from_quote(quote_leg) if quote_leg else None
         entry_price = leg.entry_price or 0.0
         side_mult = 1 if leg.side == "BUY" else -1
-        entry_value = entry_price * leg.quantity * LOT_SIZE * side_mult
+        entry_value = entry_price * leg.quantity * MULTIPLIER * side_mult
         current_value = (
-            (current_price or 0.0) * leg.quantity * LOT_SIZE * side_mult
+            (current_price or 0.0) * leg.quantity * MULTIPLIER * side_mult
             if current_price is not None
             else entry_value
         )

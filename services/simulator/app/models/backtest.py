@@ -20,7 +20,7 @@ class EntryLogic(str, Enum):
     """Entry logic for backtests."""
     ON_DATE = "ON_DATE"  # Enter on specific date
     DAILY = "DAILY"  # Enter daily
-    WEEKLY = "WEEKLY"  # Enter weekly (Mondays)
+    WEEKLY = "WEEKLY"  # Enter weekly (first trading day of the week)
     MONTHLY = "MONTHLY"  # Enter monthly (first trading day)
 
 
