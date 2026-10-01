@@ -1,4 +1,4 @@
-"""Nifty market data endpoints."""
+"""Underlying index (SPX) market data endpoints."""
 
 import logging
 from datetime import date, datetime
@@ -7,21 +7,19 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Path
 from fastapi.responses import JSONResponse
 
-from ..models.market_data import NiftyHistoricalResponse, NiftySpotResponse, HistoricalDataQuery
+from .. import market_spec
+from ..models.market_data import UnderlyingHistoryResponse, UnderlyingSpotResponse
 from ..services.data_provider import DataProvider
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/nifty", tags=["nifty"])
+router = APIRouter(prefix="/underlying", tags=["underlying"])
 data_provider = DataProvider()
 
 
-@router.get("/spot", response_model=NiftySpotResponse, summary="Get current Nifty spot price")
+@router.get("/spot", response_model=UnderlyingSpotResponse, summary="Latest SPX close")
 async def get_spot_price():
-    """Get the latest Nifty 50 spot price.
-
-    Returns the most recent closing price from the database.
-    """
+    """Latest close of the underlying, with the change from the previous close."""
     try:
         spot_data = data_provider.get_latest_spot_price()
 
@@ -31,17 +29,12 @@ async def get_spot_price():
                 detail="No historical data found. Please populate the database first."
             )
 
-        # Calculate change from previous day
-        # TODO: Implement proper change calculation when we have real-time data
-        change = None
-        change_percent = None
-
-        return NiftySpotResponse(
-            symbol="NIFTY",
+        return UnderlyingSpotResponse(
+            symbol=market_spec.SYMBOL,
             price=spot_data['price'],
-            timestamp=datetime.combine(spot_data['date'], datetime.min.time()),
-            change=change,
-            change_percent=change_percent,
+            timestamp=market_spec.session_close(spot_data['date']),
+            change=round(spot_data['change'], 2) if spot_data['change'] is not None else None,
+            change_percent=round(spot_data['change_percent'], 3) if spot_data['change_percent'] is not None else None,
             volume=spot_data.get('volume')
         )
 
@@ -52,12 +45,12 @@ async def get_spot_price():
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/historical", response_model=NiftyHistoricalResponse, summary="Get historical Nifty data")
+@router.get("/historical", response_model=UnderlyingHistoryResponse, summary="Historical SPX daily candles")
 async def get_historical_data(
     start_date: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: date = Query(..., description="End date (YYYY-MM-DD)")
 ):
-    """Get historical Nifty OHLCV data for a date range.
+    """Daily OHLCV for the underlying over a date range.
 
     Args:
         start_date: Start date for historical data
@@ -97,8 +90,8 @@ async def get_historical_data(
                 detail=f"No data found for date range {start_date} to {end_date}"
             )
 
-        return NiftyHistoricalResponse(
-            symbol="NIFTY",
+        return UnderlyingHistoryResponse(
+            symbol=market_spec.SYMBOL,
             data=candles,
             count=len(candles),
             start_date=start_date,
@@ -112,7 +105,7 @@ async def get_historical_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/candles/{period}", summary="Get Nifty candles for predefined period")
+@router.get("/candles/{period}", response_model=UnderlyingHistoryResponse, summary="SPX candles for a predefined period")
 async def get_candles_by_period(
     period: str = Path(..., pattern="^(1d|1w|1m|3m|6m|1y|5y)$", description="Time period")
 ):
@@ -153,8 +146,8 @@ async def get_candles_by_period(
                 detail=f"No data found for period {period}"
             )
 
-        return NiftyHistoricalResponse(
-            symbol="NIFTY",
+        return UnderlyingHistoryResponse(
+            symbol=market_spec.SYMBOL,
             data=candles,
             count=len(candles),
             start_date=start_date,

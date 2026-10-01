@@ -149,14 +149,14 @@ class BlackScholesCalculator:
         Args:
             spot_price: Current spot price
             strike: Strike price
-            option_type: 'CE' for call, 'PE' for put
+            option_type: 'C' for call, 'P' for put
 
         Returns:
             Intrinsic value (non-negative)
         """
-        if option_type == "CE":
+        if option_type == "C":
             return max(spot_price - strike, 0)
-        elif option_type == "PE":
+        elif option_type == "P":
             return max(strike - spot_price, 0)
         else:
             raise ValueError(f"Invalid option_type: {option_type}")
@@ -175,7 +175,7 @@ class BlackScholesCalculator:
             option_price: Option premium
             spot_price: Current spot price
             strike: Strike price
-            option_type: 'CE' for call, 'PE' for put
+            option_type: 'C' for call, 'P' for put
 
         Returns:
             Time value (non-negative)

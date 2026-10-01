@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field, field_validator
 
 class OptionType(str, Enum):
     """Option type enumeration."""
-    CALL = "CE"  # Call European
-    PUT = "PE"   # Put European
+    CALL = "C"
+    PUT = "P"
 
 
 class Greeks(BaseModel):
@@ -62,12 +62,12 @@ class OptionData(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "strike": 21700.0,
-                "option_type": "CE",
-                "expiry_date": "2024-01-25",
-                "price": 156.25,
-                "bid": 155.50,
-                "ask": 157.00,
+                "strike": 7650.0,
+                "option_type": "C",
+                "expiry_date": "2026-10-02",
+                "price": 31.45,
+                "bid": 31.20,
+                "ask": 31.70,
                 "greeks": {
                     "delta": 0.52,
                     "gamma": 0.00012,
@@ -78,8 +78,8 @@ class OptionData(BaseModel):
                 "implied_volatility": 0.1245,
                 "open_interest": 145000,
                 "volume": 52000,
-                "intrinsic_value": 25.50,
-                "time_value": 130.75,
+                "intrinsic_value": 1.54,
+                "time_value": 29.91,
                 "in_the_money": True
             }
         }
@@ -89,31 +89,35 @@ class OptionData(BaseModel):
 class OptionChainResponse(BaseModel):
     """Option chain response with calls and puts."""
 
-    symbol: str = "NIFTY"
-    spot_price: float = Field(..., gt=0, description="Current spot price")
+    symbol: str = "SPX"
+    spot_price: float = Field(..., gt=0, description="Underlying price the chain is priced off")
     date: date
     expiry_date: date
     options: List[OptionData]
     total_call_oi: Optional[int] = Field(None, ge=0, description="Total call open interest")
     total_put_oi: Optional[int] = Field(None, ge=0, description="Total put open interest")
     pcr: Optional[float] = Field(None, ge=0, description="Put-Call ratio (OI based)")
+    atm_iv: Optional[float] = Field(None, ge=0, description="At-the-money implied volatility")
+    source: str = Field("synthetic", description="'snapshot' for collected listed quotes, 'synthetic' for Black-Scholes")
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "symbol": "NIFTY",
-                "spot_price": 21725.50,
-                "date": "2024-01-15",
-                "expiry_date": "2024-01-25",
-                "total_call_oi": 15000000,
-                "total_put_oi": 18000000,
-                "pcr": 1.20,
+                "symbol": "SPX",
+                "spot_price": 7651.54,
+                "date": "2026-09-30",
+                "expiry_date": "2026-10-02",
+                "total_call_oi": 410000,
+                "total_put_oi": 532000,
+                "pcr": 1.30,
+                "atm_iv": 0.1402,
+                "source": "synthetic",
                 "options": [
                     {
-                        "strike": 21700.0,
-                        "option_type": "CE",
-                        "expiry_date": "2024-01-25",
-                        "price": 156.25,
+                        "strike": 7650.0,
+                        "option_type": "C",
+                        "expiry_date": "2026-10-02",
+                        "price": 31.45,
                         "greeks": {
                             "delta": 0.52,
                             "gamma": 0.00012,

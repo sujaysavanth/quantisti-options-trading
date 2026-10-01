@@ -1,12 +1,13 @@
 """Option chain endpoints."""
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Path
 
-from ..models.options import OptionChainResponse, OptionChainQuery
+from .. import market_spec
+from ..models.options import OptionChainResponse
 from ..services.data_provider import DataProvider
 
 logger = logging.getLogger(__name__)
@@ -15,31 +16,22 @@ router = APIRouter(prefix="/options", tags=["options"])
 data_provider = DataProvider()
 
 
-@router.get("/chain", response_model=OptionChainResponse, summary="Get Nifty option chain")
+@router.get("/chain", response_model=OptionChainResponse, summary="SPX option chain")
 async def get_option_chain(
-    date_param: Optional[date] = Query(None, alias="date", description="Date for option chain (YYYY-MM-DD). If None, uses latest available date"),
-    expiry_date: Optional[date] = Query(None, description="Option expiry date (YYYY-MM-DD). If None, uses next weekly expiry (Tuesday)"),
-    strike_range: int = Query(10, ge=1, le=50, description="Number of strikes above/below ATM to include")
+    date_param: Optional[date] = Query(None, alias="date", description="Trading day to price the chain for (YYYY-MM-DD). Defaults to the latest loaded day"),
+    expiry_date: Optional[date] = Query(None, description="Listed expiry (YYYY-MM-DD). Defaults to the nearest expiry with time remaining"),
+    strike_range: int = Query(10, ge=1, le=50, description="Number of 5-point strikes above and below the money")
 ):
-    """Get Nifty option chain with calculated prices and Greeks.
+    """SPX option chain with prices, implied volatility and Greeks.
 
-    This endpoint generates a complete option chain using Black-Scholes pricing model
-    based on historical Nifty data. All option prices and Greeks are calculated using:
-    - Historical volatility from the database
-    - Black-Scholes-Merton model for European options
-    - Risk-free rate: 6.5% (configurable)
-    - Dividend yield: 1.2% (configurable)
-
-    Args:
-        date_param: Date for which to generate option chain. Defaults to latest available.
-        expiry_date: Option expiry date. Defaults to next weekly expiry (Tuesday).
-        strike_range: Number of strike prices to include above and below ATM strike.
-
-    Returns:
-        Complete option chain with calls and puts, Greeks, and market data
+    When a collected snapshot of listed quotes exists for the day and expiry
+    (`source: snapshot`), prices are real mid quotes and IV/Greeks are
+    recomputed from them against a parity-implied forward. Otherwise
+    (`source: synthetic`) prices come from Black-Scholes-Merton using the
+    day's close, a VIX-based volatility smile, the 3-month T-bill rate and a
+    1.3% dividend yield.
     """
     try:
-        # Generate option chain
         chain_data = data_provider.generate_option_chain(
             target_date=date_param,
             expiry_date=expiry_date,
@@ -50,18 +42,14 @@ async def get_option_chain(
             if date_param:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"No data available for date {date_param}. The option may have expired or no historical data exists."
+                    detail=f"No data for {date_param}: not a trading day, not loaded, or the expiry has passed."
                 )
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail="No historical data found. Please populate the database with Nifty data first."
-                )
+            raise HTTPException(
+                status_code=404,
+                detail="No market data loaded. Run scripts/populate_us_data.py first."
+            )
 
-        return OptionChainResponse(
-            symbol="NIFTY",
-            **chain_data
-        )
+        return OptionChainResponse(symbol=market_spec.SYMBOL, **chain_data)
 
     except HTTPException:
         raise
@@ -106,11 +94,11 @@ async def get_options_by_strike(
         if not options:
             raise HTTPException(
                 status_code=404,
-                detail=f"Strike {strike} not found. Available strikes range from ATM ±{50 * 50} points."
+                detail=f"Strike {strike} not found within ±{50 * market_spec.STRIKE_STEP} points of the money."
             )
 
         return {
-            "symbol": "NIFTY",
+            "symbol": market_spec.SYMBOL,
             "spot_price": chain_data['spot_price'],
             "date": chain_data['date'],
             "expiry_date": chain_data['expiry_date'],
@@ -125,23 +113,16 @@ async def get_options_by_strike(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/expiries", summary="Get available expiry dates")
+@router.get("/expiries", summary="Listed expiry dates")
 async def get_available_expiries(
-    current_date: Optional[date] = Query(None, description="Reference date (defaults to latest available)")
+    current_date: Optional[date] = Query(None, description="Reference date (defaults to latest loaded day)"),
+    days: int = Query(45, ge=1, le=400, description="How many calendar days ahead to list")
 ):
-    """Get list of available option expiry dates.
+    """SPX expiries from the reference date, on the NYSE calendar.
 
-    For Nifty options, this returns the monthly expiry dates (last Tuesday of each month)
-    for the next 3 months.
-
-    Args:
-        current_date: Reference date for calculating expiries
-
-    Returns:
-        List of expiry dates
+    Daily (Mon-Fri) expiries since 2022, Mon/Wed/Fri from 2016, Fridays before
+    that; holidays are skipped. Third-Friday expiries are flagged `monthly`.
     """
-    from datetime import timedelta
-
     try:
         if current_date is None:
             spot_data = data_provider.get_latest_spot_price()
@@ -149,38 +130,15 @@ async def get_available_expiries(
                 raise HTTPException(status_code=404, detail="No data available")
             current_date = spot_data['date']
 
-        # Generate next 3 monthly expiries (last Tuesday of each month)
-        expiries = []
-        for i in range(3):
-            # Move to next month
-            if current_date.month + i > 12:
-                year = current_date.year + 1
-                month = (current_date.month + i) % 12
-            else:
-                year = current_date.year
-                month = current_date.month + i
-
-            # Get last day of month
-            if month == 12:
-                last_day = date(year + 1, 1, 1) - timedelta(days=1)
-            else:
-                last_day = date(year, month + 1, 1) - timedelta(days=1)
-
-            # Find last Tuesday
-            while last_day.weekday() != 1:  # 1 = Tuesday
-                last_day -= timedelta(days=1)
-
-            if last_day >= current_date:
-                expiries.append({
-                    "expiry_date": last_day,
-                    "days_to_expiry": (last_day - current_date).days,
-                    "type": "monthly"
-                })
-
-        return {
-            "current_date": current_date,
-            "expiries": expiries
-        }
+        expiries = [
+            {
+                "expiry_date": d,
+                "days_to_expiry": (d - current_date).days,
+                "type": "monthly" if market_spec.is_monthly_expiry(d) else "weekly" if d.weekday() == 4 else "daily",
+            }
+            for d in market_spec.expiries_between(current_date, current_date + timedelta(days=days))
+        ]
+        return {"current_date": current_date, "expiries": expiries}
 
     except HTTPException:
         raise

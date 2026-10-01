@@ -35,22 +35,22 @@ class CandleData(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "date": "2024-01-15",
-                "open": 21650.50,
-                "high": 21725.80,
-                "low": 21580.25,
-                "close": 21698.85,
-                "volume": 285000000,
-                "historical_volatility": 0.1245
+                "date": "2026-09-30",
+                "open": 7660.12,
+                "high": 7688.40,
+                "low": 7640.03,
+                "close": 7651.54,
+                "volume": 2850000000,
+                "historical_volatility": 0.0984
             }
         }
     }
 
 
-class NiftySpotResponse(BaseModel):
-    """Current Nifty spot price and metadata."""
+class UnderlyingSpotResponse(BaseModel):
+    """Latest close of the underlying index."""
 
-    symbol: str = "NIFTY"
+    symbol: str = "SPX"
     price: float = Field(..., gt=0, description="Current spot price")
     timestamp: datetime
     change: Optional[float] = Field(None, description="Price change from previous close")
@@ -60,21 +60,21 @@ class NiftySpotResponse(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "symbol": "NIFTY",
-                "price": 21698.85,
-                "timestamp": "2024-01-15T15:30:00",
-                "change": 125.50,
-                "change_percent": 0.58,
-                "volume": 285000000
+                "symbol": "SPX",
+                "price": 7651.54,
+                "timestamp": "2026-09-30T16:00:00-04:00",
+                "change": -19.30,
+                "change_percent": -0.25,
+                "volume": 2850000000
             }
         }
     }
 
 
-class NiftyHistoricalResponse(BaseModel):
-    """Historical Nifty data response."""
+class UnderlyingHistoryResponse(BaseModel):
+    """Historical daily candles for the underlying index."""
 
-    symbol: str = "NIFTY"
+    symbol: str = "SPX"
     data: List[CandleData]
     count: int = Field(..., ge=0, description="Number of candles returned")
     start_date: date
@@ -83,19 +83,19 @@ class NiftyHistoricalResponse(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "symbol": "NIFTY",
+                "symbol": "SPX",
                 "count": 2,
-                "start_date": "2024-01-15",
-                "end_date": "2024-01-16",
+                "start_date": "2026-09-29",
+                "end_date": "2026-09-30",
                 "data": [
                     {
-                        "date": "2024-01-15",
-                        "open": 21650.50,
-                        "high": 21725.80,
-                        "low": 21580.25,
-                        "close": 21698.85,
-                        "volume": 285000000,
-                        "historical_volatility": 0.1245
+                        "date": "2026-09-30",
+                        "open": 7660.12,
+                        "high": 7688.40,
+                        "low": 7640.03,
+                        "close": 7651.54,
+                        "volume": 2850000000,
+                        "historical_volatility": 0.0984
                     }
                 ]
             }

@@ -29,7 +29,7 @@ class GreeksCalculator:
             time_to_expiry: Time to expiration in years
             risk_free_rate: Risk-free interest rate (annual)
             volatility: Implied volatility (annual)
-            option_type: 'CE' for call, 'PE' for put
+            option_type: 'C' for call, 'P' for put
             dividend_yield: Dividend yield (annual)
 
         Returns:
@@ -48,7 +48,7 @@ class GreeksCalculator:
         d2 = d1 - volatility * math.sqrt(time_to_expiry)
 
         # Calculate Delta
-        if option_type == "CE":
+        if option_type == "C":
             delta = math.exp(-dividend_yield * time_to_expiry) * norm.cdf(d1)
         else:  # PUT
             delta = -math.exp(-dividend_yield * time_to_expiry) * norm.cdf(-d1)
@@ -71,7 +71,7 @@ class GreeksCalculator:
         )
 
         # Calculate Theta
-        if option_type == "CE":
+        if option_type == "C":
             theta = (
                 -spot_price * norm.pdf(d1) * volatility * math.exp(-dividend_yield * time_to_expiry)
                 / (2 * math.sqrt(time_to_expiry))
@@ -88,7 +88,7 @@ class GreeksCalculator:
 
         # Calculate Rho
         # Rho is typically expressed per 1% change in interest rate
-        if option_type == "CE":
+        if option_type == "C":
             rho = (
                 strike
                 * time_to_expiry
@@ -131,7 +131,7 @@ class GreeksCalculator:
             time_to_expiry: Time to expiration in years
             risk_free_rate: Risk-free interest rate (annual)
             volatility: Implied volatility (annual)
-            option_type: 'CE' for call, 'PE' for put
+            option_type: 'C' for call, 'P' for put
             dividend_yield: Dividend yield (annual)
 
         Returns:
@@ -145,7 +145,7 @@ class GreeksCalculator:
             + (risk_free_rate - dividend_yield + 0.5 * volatility ** 2) * time_to_expiry
         ) / (volatility * math.sqrt(time_to_expiry))
 
-        if option_type == "CE":
+        if option_type == "C":
             return math.exp(-dividend_yield * time_to_expiry) * norm.cdf(d1)
         else:
             return -math.exp(-dividend_yield * time_to_expiry) * norm.cdf(-d1)
