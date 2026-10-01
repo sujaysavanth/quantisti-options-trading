@@ -159,3 +159,19 @@ async def get_candles_by_period(
     except Exception as e:
         logger.error(f"Error fetching candles for period {period}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/vix", summary="CBOE VIX daily closes")
+async def get_vix_history(
+    start_date: date = Query(..., description="Start date (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="End date (YYYY-MM-DD)")
+):
+    """VIX closes (30-day implied volatility of SPX, in vol points) for a date range."""
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="end_date must be greater than or equal to start_date")
+    try:
+        data = data_provider.get_vix_history(start_date, end_date)
+    except Exception as e:
+        logger.error(f"Error fetching VIX history: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    return {"symbol": "VIX", "count": len(data), "data": data}

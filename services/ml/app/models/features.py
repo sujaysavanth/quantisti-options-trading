@@ -25,6 +25,9 @@ class VolatilityFeatures(BaseModel):
     historical_vol_10d: Optional[float] = Field(None, description="10-day historical volatility")
     historical_vol_20d: Optional[float] = Field(None, description="20-day historical volatility")
     atr_14: Optional[float] = Field(None, description="14-period ATR")
+    vix_close: Optional[float] = Field(None, description="VIX close at the end of the window (vol points)")
+    vix_change_1w: Optional[float] = Field(None, description="VIX change over the previous 5 sessions (points)")
+    vix_hv_spread: Optional[float] = Field(None, description="VIX minus 20-day realised vol (variance risk premium proxy)")
 
 
 class WeeklyFeatures(BaseModel):
@@ -43,7 +46,7 @@ class WeeklyFeatures(BaseModel):
 
 class FeatureComputeRequest(BaseModel):
     """Request to compute features."""
-    symbol: str = Field(..., description="Underlying symbol (e.g., NIFTY)")
+    symbol: str = Field(..., description="Underlying symbol (e.g., SPX)")
     week_start_date: datetime = Field(..., description="Start date of the week")
     force_recompute: bool = Field(False, description="Force recompute even if exists")
 

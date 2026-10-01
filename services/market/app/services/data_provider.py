@@ -124,6 +124,14 @@ class DataProvider:
             return DEFAULT_VIX
         return float(row["close"])
 
+    def get_vix_history(self, start_date: date, end_date: date) -> List[Dict[str, Any]]:
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT date, close FROM vix_daily WHERE date >= %s AND date <= %s ORDER BY date",
+                (start_date, end_date),
+            )
+            return [{"date": r["date"], "close": float(r["close"])} for r in cur.fetchall()]
+
     def get_snapshot_quotes(self, on: date, expiry: date) -> List[Dict[str, Any]]:
         with self._cursor() as cur:
             cur.execute(

@@ -72,14 +72,20 @@ class FeatureService:
             df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
 
             # Sort by date
+            df['date'] = pd.to_datetime(df['date']).dt.date
             df = df.sort_values('date')
+
+            vix_rows = await self.market_client.fetch_vix_history(df['date'].min(), df['date'].max())
+            vix = pd.DataFrame(vix_rows) if vix_rows else None
+            if vix is not None:
+                vix['date'] = pd.to_datetime(vix['date']).dt.date
 
             logger.info(f"Computing features from {len(df)} candles")
 
             # Compute all features
             price_features = PriceFeatures(**self.price_calc.calculate_all(df))
             technical_features = TechnicalIndicators(**self.technical_calc.calculate_all(df))
-            volatility_features = VolatilityFeatures(**self.volatility_calc.calculate_all(df))
+            volatility_features = VolatilityFeatures(**self.volatility_calc.calculate_all(df, vix))
 
             features = WeeklyFeatures(
                 week_start_date=week_start_date,
@@ -96,6 +102,33 @@ class FeatureService:
         except Exception as e:
             logger.error(f"Error computing features: {e}", exc_info=True)
             return None
+
+    @staticmethod
+    def _row_to_features(row) -> WeeklyFeatures:
+        return WeeklyFeatures(
+            week_start_date=row['week_start_date'],
+            symbol=row['symbol'],
+            price_features=PriceFeatures(
+                weekly_change_pct=row['weekly_change_pct'],
+                weekly_high_low_range_pct=row['weekly_high_low_range_pct'],
+                volume_ratio=row['volume_ratio'],
+            ),
+            technical_indicators=TechnicalIndicators(
+                rsi_14=row['rsi_14'],
+                macd=row['macd'],
+                macd_signal=row['macd_signal'],
+                bb_width=row['bb_width'],
+            ),
+            volatility_features=VolatilityFeatures(
+                historical_vol_10d=row['historical_vol_10d'],
+                historical_vol_20d=row['historical_vol_20d'],
+                atr_14=row['atr_14'],
+                vix_close=row.get('vix_close'),
+                vix_change_1w=row.get('vix_change_1w'),
+                vix_hv_spread=row.get('vix_hv_spread'),
+            ),
+            created_at=row['created_at'],
+        )
 
     def save_features(self, features: WeeklyFeatures) -> bool:
         """Save computed features to database.
@@ -132,6 +165,9 @@ class FeatureService:
             historical_vol_10d = vol.historical_vol_10d if vol else None
             historical_vol_20d = vol.historical_vol_20d if vol else None
             atr_14 = vol.atr_14 if vol else None
+            vix_close = vol.vix_close if vol else None
+            vix_change_1w = vol.vix_change_1w if vol else None
+            vix_hv_spread = vol.vix_hv_spread if vol else None
 
             # Insert or update features
             cursor.execute(
@@ -139,8 +175,8 @@ class FeatureService:
                 INSERT INTO weekly_features
                 (week_start_date, symbol, weekly_change_pct, weekly_high_low_range_pct, volume_ratio,
                  rsi_14, macd, macd_signal, bb_width, historical_vol_10d, historical_vol_20d, atr_14,
-                 created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                 vix_close, vix_change_1w, vix_hv_spread, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                 ON CONFLICT (week_start_date, symbol)
                 DO UPDATE SET
                     weekly_change_pct = EXCLUDED.weekly_change_pct,
@@ -153,11 +189,15 @@ class FeatureService:
                     historical_vol_10d = EXCLUDED.historical_vol_10d,
                     historical_vol_20d = EXCLUDED.historical_vol_20d,
                     atr_14 = EXCLUDED.atr_14,
+                    vix_close = EXCLUDED.vix_close,
+                    vix_change_1w = EXCLUDED.vix_change_1w,
+                    vix_hv_spread = EXCLUDED.vix_hv_spread,
                     updated_at = NOW()
                 """,
                 (week_start, features.symbol, weekly_change_pct, weekly_high_low_range_pct,
                  volume_ratio, rsi_14, macd, macd_signal, bb_width,
-                 historical_vol_10d, historical_vol_20d, atr_14)
+                 historical_vol_10d, historical_vol_20d, atr_14,
+                 vix_close, vix_change_1w, vix_hv_spread)
             )
 
             conn.commit()
@@ -210,34 +250,7 @@ class FeatureService:
                 logger.info(f"No features found for {symbol} week {week_start}")
                 return None
 
-            # Reconstruct feature objects
-            price_features = PriceFeatures(
-                weekly_change_pct=result['weekly_change_pct'],
-                weekly_high_low_range_pct=result['weekly_high_low_range_pct'],
-                volume_ratio=result['volume_ratio']
-            )
-
-            technical_features = TechnicalIndicators(
-                rsi_14=result['rsi_14'],
-                macd=result['macd'],
-                macd_signal=result['macd_signal'],
-                bb_width=result['bb_width']
-            )
-
-            volatility_features = VolatilityFeatures(
-                historical_vol_10d=result['historical_vol_10d'],
-                historical_vol_20d=result['historical_vol_20d'],
-                atr_14=result['atr_14']
-            )
-
-            features = WeeklyFeatures(
-                week_start_date=result['week_start_date'],
-                symbol=result['symbol'],
-                price_features=price_features,
-                technical_indicators=technical_features,
-                volatility_features=volatility_features,
-                created_at=result['created_at']
-            )
+            features = self._row_to_features(result)
 
             logger.info(f"Retrieved features for {symbol} week {week_start}")
             return features
@@ -280,34 +293,7 @@ class FeatureService:
             if not result:
                 return None
 
-            # Reconstruct feature objects (same as get_features)
-            price_features = PriceFeatures(
-                weekly_change_pct=result['weekly_change_pct'],
-                weekly_high_low_range_pct=result['weekly_high_low_range_pct'],
-                volume_ratio=result['volume_ratio']
-            )
-
-            technical_features = TechnicalIndicators(
-                rsi_14=result['rsi_14'],
-                macd=result['macd'],
-                macd_signal=result['macd_signal'],
-                bb_width=result['bb_width']
-            )
-
-            volatility_features = VolatilityFeatures(
-                historical_vol_10d=result['historical_vol_10d'],
-                historical_vol_20d=result['historical_vol_20d'],
-                atr_14=result['atr_14']
-            )
-
-            features = WeeklyFeatures(
-                week_start_date=result['week_start_date'],
-                symbol=result['symbol'],
-                price_features=price_features,
-                technical_indicators=technical_features,
-                volatility_features=volatility_features,
-                created_at=result['created_at']
-            )
+            features = self._row_to_features(result)
 
             return features
 

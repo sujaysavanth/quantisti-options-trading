@@ -78,17 +78,50 @@ class VolatilityCalculator:
             logger.error(f"Error calculating ATR: {e}")
             return None
 
-    def calculate_all(self, data: pd.DataFrame) -> Dict[str, Optional[float]]:
+    @staticmethod
+    def calculate_vix_features(vix: Optional[pd.DataFrame], as_of, hv_20d: Optional[float]) -> Dict[str, Optional[float]]:
+        """Implied-volatility features from VIX closes up to `as_of`.
+
+        Args:
+            vix: DataFrame with 'date' and 'close' columns (VIX in vol points)
+            as_of: Last date the features may use
+            hv_20d: 20-day realised volatility in percent, for the variance risk premium
+
+        Returns:
+            vix_close, vix_change_1w (points over the previous 5 sessions) and
+            vix_hv_spread (VIX minus 20-day realised vol: the premium option
+            sellers collect when positive)
+        """
+        empty = {'vix_close': None, 'vix_change_1w': None, 'vix_hv_spread': None}
+        if vix is None or vix.empty:
+            return empty
+        series = vix[vix['date'] <= as_of].sort_values('date')['close'].astype(float)
+        if series.empty:
+            return empty
+        close = float(series.iloc[-1])
+        change = close - float(series.iloc[-6]) if len(series) >= 6 else None
+        return {
+            'vix_close': round(close, 2),
+            'vix_change_1w': round(change, 2) if change is not None else None,
+            'vix_hv_spread': round(close - hv_20d, 2) if hv_20d is not None else None,
+        }
+
+    def calculate_all(self, data: pd.DataFrame, vix: Optional[pd.DataFrame] = None) -> Dict[str, Optional[float]]:
         """Calculate all volatility features.
 
         Args:
             data: DataFrame with OHLC data
+            vix: Optional VIX closes ('date', 'close') covering the same window
 
         Returns:
             Dictionary with all volatility features
         """
-        return {
+        hv_20 = self.calculate_historical_volatility(data, 20)
+        features = {
             'historical_vol_10d': self.calculate_historical_volatility(data, 10),
-            'historical_vol_20d': self.calculate_historical_volatility(data, 20),
-            'atr_14': self.calculate_atr(data, 14)
+            'historical_vol_20d': hv_20,
+            'atr_14': self.calculate_atr(data, 14),
         }
+        if 'date' in data.columns:
+            features.update(self.calculate_vix_features(vix, data['date'].max(), hv_20))
+        return features

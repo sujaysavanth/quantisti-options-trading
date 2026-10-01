@@ -26,7 +26,7 @@ class MarketDataClient:
         """Fetch historical OHLC data from market service.
 
         Args:
-            symbol: Underlying symbol (e.g., NIFTY)
+            symbol: Underlying symbol (e.g., SPX)
             start_date: Start date
             end_date: End date
 
@@ -35,7 +35,7 @@ class MarketDataClient:
         """
         try:
             # Market service endpoint for historical data
-            url = f"{self.base_url}/v1/nifty/historical"
+            url = f"{self.base_url}/v1/underlying/historical"
             params = {
                 "start_date": start_date.isoformat(),
                 "end_date": end_date.isoformat()
@@ -50,7 +50,7 @@ class MarketDataClient:
                 data = response.json()
 
                 # Extract candle data from response
-                # Response format: {"symbol": "NIFTY", "data": [...], "count": N}
+                # Response format: {"symbol": "SPX", "data": [...], "count": N}
                 candles = data.get('data', [])
 
                 logger.info(f"Fetched {len(candles)} candles from market service")
@@ -67,6 +67,20 @@ class MarketDataClient:
             logger.error(f"Error fetching market data: {e}")
             return None
 
+    async def fetch_vix_history(self, start_date: date, end_date: date) -> Optional[List[Dict]]:
+        """VIX daily closes from the market service, or None if unavailable."""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/underlying/vix",
+                    params={"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
+                )
+                response.raise_for_status()
+                return response.json().get("data", [])
+        except Exception as e:
+            logger.error(f"Error fetching VIX history: {e}")
+            return None
+
     async def fetch_latest_price(self, symbol: str) -> Optional[float]:
         """Fetch latest price for a symbol.
 
@@ -77,7 +91,7 @@ class MarketDataClient:
             Latest closing price
         """
         try:
-            url = f"{self.base_url}/v1/nifty/spot"
+            url = f"{self.base_url}/v1/underlying/spot"
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(url)

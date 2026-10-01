@@ -84,7 +84,7 @@ async def get_weekly_features(
     """Get features for a specific week.
 
     Args:
-        symbol: Underlying symbol (e.g., NIFTY)
+        symbol: Underlying symbol (e.g., SPX)
         date: Week start date
 
     Returns:
@@ -148,7 +148,7 @@ async def get_latest_features(symbol: str):
             summary="Backfill historical features")
 async def backfill_features(
     background_tasks: BackgroundTasks,
-    symbol: str = Query("NIFTY", description="Symbol to backfill"),
+    symbol: str = Query("SPX", description="Symbol to backfill"),
     start_date: datetime = Query(..., description="Start date"),
     end_date: datetime = Query(..., description="End date"),
     interval_days: int = Query(7, description="Interval in days (default 7 for weekly)")

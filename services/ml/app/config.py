@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     }
 
     # Default underlying symbols
-    DEFAULT_SYMBOLS: list = ["NIFTY", "BANKNIFTY"]
+    DEFAULT_SYMBOLS: list = ["SPX"]
 
     class Config:
         env_file = ".env"
