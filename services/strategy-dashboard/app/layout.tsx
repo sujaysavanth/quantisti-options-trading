@@ -4,7 +4,7 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 
 export const metadata: Metadata = {
   title: 'Quantisti Strategy Dashboard',
-  description: 'Weekly Nifty options intelligence with ML-powered forecasts and strategy recommendations.'
+  description: 'SPX options intelligence with ML-powered forecasts and strategy recommendations.'
 };
 
 export default function RootLayout({

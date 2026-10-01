@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usd } from '@/data/format';
 
 type QuoteMessage = {
   type: string;
@@ -54,7 +55,7 @@ const defaultLeg = (): PaperLegForm => ({
 export default function PaperTradingPage() {
   const [spot, setSpot] = useState<number | null>(null);
   const [orders, setOrders] = useState<PaperTrade[]>([]);
-  const [symbol, setSymbol] = useState('NIFTY');
+  const [symbol, setSymbol] = useState('SPX');
   const [nickname, setNickname] = useState('Weekly strategy');
   const [legs, setLegs] = useState<PaperLegForm[]>([defaultLeg()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -156,7 +157,7 @@ export default function PaperTradingPage() {
             Live quotes from Market Stream with simulated trades stored in the simulator service.
           </p>
           <div className="text-lg font-semibold text-emerald-400">
-            {spot ? `NIFTY Spot: ₹${spot.toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : 'Waiting for quotes...'}
+            {spot ? `${symbol} ${spot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Waiting for quotes...'}
           </div>
         </header>
 
@@ -303,7 +304,7 @@ export default function PaperTradingPage() {
                     <div className="text-right">
                       <p className="text-sm text-slate-400">PnL</p>
                       <p className={order.pnl >= 0 ? 'text-emerald-400 text-xl font-semibold' : 'text-rose-400 text-xl font-semibold'}>
-                        ₹{order.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                        {usd(order.pnl)}
                       </p>
                     </div>
                   </div>
@@ -326,10 +327,10 @@ export default function PaperTradingPage() {
                               </div>
                               <div className="text-xs text-slate-500">{leg.identifier || leg.expiry}</div>
                             </td>
-                            <td className="py-2 pr-3">₹{leg.entry_price?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) ?? '--'}</td>
-                            <td className="py-2 pr-3">₹{leg.current_price?.toLocaleString('en-IN', { maximumFractionDigits: 2 }) ?? '--'}</td>
+                            <td className="py-2 pr-3">{leg.entry_price != null ? usd(leg.entry_price, 2) : '--'}</td>
+                            <td className="py-2 pr-3">{leg.current_price != null ? usd(leg.current_price, 2) : '--'}</td>
                             <td className={`py-2 pr-3 ${leg.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              ₹{leg.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                              {usd(leg.pnl)}
                             </td>
                           </tr>
                         ))}

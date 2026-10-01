@@ -9,10 +9,12 @@ import { MarginInsights } from '@/components/MarginInsights';
 import { StrategyTable } from '@/components/StrategyTable';
 import { OptionBreakdown } from '@/components/OptionBreakdown';
 import { dashboardMock, type StrategyRecommendation, type OptionLeg } from '@/data/mockDashboard';
+import { MULTIPLIER, optionCode, shortDate, usd } from '@/data/format';
 
 const SIM_API = process.env.NEXT_PUBLIC_SIMULATOR_API ?? 'http://localhost:8082';
 const STREAM_API = process.env.NEXT_PUBLIC_MARKET_STREAM_API ?? 'http://localhost:8090';
-const LOT_SIZE = 75;
+// Live strategies place strikes this far apart (SPX points, on the 5-point grid).
+const WING = 25;
 
 type MarketLegQuote = {
   identifier?: string;
@@ -86,10 +88,10 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
   const strategies: StrategyRecommendation[] = [];
   const price = quote.last_price;
 
-  const shortCall = findLeg(callLegs, price + 100, 'above');
-  const longCall = shortCall ? findLeg(callLegs, shortCall.strike + 100, 'above') : undefined;
-  const shortPut = findLeg(putLegs, price - 100, 'below');
-  const longPut = shortPut ? findLeg(putLegs, shortPut.strike - 100, 'below') : undefined;
+  const shortCall = findLeg(callLegs, price + WING, 'above');
+  const longCall = shortCall ? findLeg(callLegs, shortCall.strike + WING, 'above') : undefined;
+  const shortPut = findLeg(putLegs, price - WING, 'below');
+  const longPut = shortPut ? findLeg(putLegs, shortPut.strike - WING, 'below') : undefined;
 
   if (shortCall && longCall && shortPut && longPut) {
     const condorLegs = [
@@ -102,9 +104,9 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
       0
     );
-    const expectedPl = Math.round(netCredit * LOT_SIZE);
+    const expectedPl = Math.round(netCredit * MULTIPLIER);
     const wingWidth = Math.min(longCall.strike - shortCall.strike, shortPut.strike - longPut.strike);
-    const maxLoss = Math.round(Math.max(wingWidth * LOT_SIZE - expectedPl, 0));
+    const maxLoss = Math.round(Math.max(wingWidth * MULTIPLIER - expectedPl, 0));
     strategies.push({
       name: 'Live Iron Condor',
       type: 'Neutral Income',
@@ -112,8 +114,8 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       expectedPl,
       maxLoss,
       winProbability: 0.65,
-      riskReward: wingWidth > 0 ? (expectedPl / (wingWidth * LOT_SIZE - expectedPl + 1e-6)) : 1.5,
-      margin: Math.max(250000, wingWidth * LOT_SIZE * 2),
+      riskReward: wingWidth > 0 ? (expectedPl / (wingWidth * MULTIPLIER - expectedPl + 1e-6)) : 1.5,
+      margin: wingWidth * MULTIPLIER,
       score: 88,
       payoffPoints: [],
       legs: condorLegs
@@ -126,9 +128,9 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
       0
     );
-    const expectedPl = Math.round(netCredit * LOT_SIZE);
+    const expectedPl = Math.round(netCredit * MULTIPLIER);
     const strikeDiff = shortPut.strike - longPut.strike;
-    const maxLoss = Math.round(Math.max(strikeDiff * LOT_SIZE - expectedPl, 0));
+    const maxLoss = Math.round(Math.max(strikeDiff * MULTIPLIER - expectedPl, 0));
     strategies.push({
       name: 'Live Bull Put Spread',
       type: 'Directional Credit',
@@ -136,8 +138,8 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       expectedPl,
       maxLoss,
       winProbability: 0.7,
-      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * LOT_SIZE - expectedPl + 1e-6)) : 1.2,
-      margin: Math.max(150000, strikeDiff * LOT_SIZE),
+      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * MULTIPLIER - expectedPl + 1e-6)) : 1.2,
+      margin: strikeDiff * MULTIPLIER,
       score: 80,
       payoffPoints: [],
       legs: spreadLegs
@@ -150,9 +152,9 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
       0
     );
-    const expectedPl = Math.round(netCredit * LOT_SIZE);
+    const expectedPl = Math.round(netCredit * MULTIPLIER);
     const strikeDiff = longCall.strike - shortCall.strike;
-    const maxLoss = Math.round(Math.max(strikeDiff * LOT_SIZE - expectedPl, 0));
+    const maxLoss = Math.round(Math.max(strikeDiff * MULTIPLIER - expectedPl, 0));
     strategies.push({
       name: 'Live Bear Call Spread',
       type: 'Directional Credit',
@@ -160,8 +162,8 @@ const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommend
       expectedPl,
       maxLoss,
       winProbability: 0.62,
-      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * LOT_SIZE - expectedPl + 1e-6)) : 1.1,
-      margin: Math.max(150000, strikeDiff * LOT_SIZE),
+      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * MULTIPLIER - expectedPl + 1e-6)) : 1.1,
+      margin: strikeDiff * MULTIPLIER,
       score: 76,
       payoffPoints: [],
       legs: spreadLegs
@@ -177,15 +179,15 @@ const computeLegPl = (leg: OptionLeg, price: number) => {
   const intrinsic =
     leg.optionType === 'CALL' ? Math.max(price - leg.strike, 0) : Math.max(leg.strike - price, 0);
   const raw = intrinsic - premium;
-  return raw * LOT_SIZE * (leg.action === 'BUY' ? 1 : -1) * qty;
+  return raw * MULTIPLIER * (leg.action === 'BUY' ? 1 : -1) * qty;
 };
 
 const buildPayoff = (legs: OptionLeg[], spot: number) => {
   if (!legs.length) return [];
   const strikes = legs.map((l) => l.strike);
-  const min = Math.min(spot, ...strikes) - 400;
-  const max = Math.max(spot, ...strikes) + 400;
-  const step = 50;
+  const min = Math.min(spot, ...strikes) - 150;
+  const max = Math.max(spot, ...strikes) + 150;
+  const step = 5;
   const points: Array<{ price: number; pl: number }> = [];
   for (let p = min; p <= max; p += step) {
     const pl = legs.reduce((sum, leg) => sum + computeLegPl(leg, p), 0);
@@ -212,19 +214,11 @@ const generateSummaryFromQuote = (quote: MarketQuoteSnapshot, fallbackExpiry: st
 
   const expiry =
     quote.legs?.[0]?.expiry
-      ? new Date(quote.legs[0].expiry).toLocaleDateString('en-IN', {
-          day: '2-digit',
-          month: 'short',
-          year: 'numeric'
-        })
+      ? shortDate(quote.legs[0].expiry)
       : fallbackExpiry;
 
   return {
-    weekOf: new Date().toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric'
-    }),
+    weekOf: shortDate(new Date()),
     expiry,
     predictedRange: {
       lower,
@@ -302,7 +296,7 @@ export default function Page() {
   useEffect(() => {
     const loadSummary = async () => {
       try {
-        const response = await fetch(`${STREAM_API}/v1/quotes/NIFTY`, { cache: 'no-store' });
+        const response = await fetch(`${STREAM_API}/v1/quotes/SPX`, { cache: 'no-store' });
         if (!response.ok) return;
         const data = (await response.json()) as MarketQuoteSnapshot;
         if (data?.legs?.length) {
@@ -321,7 +315,7 @@ export default function Page() {
   useEffect(() => {
     const loadStrategies = async () => {
       try {
-        const response = await fetch(`${SIM_API}/v1/strategies-live?symbol=NIFTY`, { cache: 'no-store' });
+        const response = await fetch(`${SIM_API}/v1/strategies-live?symbol=SPX`, { cache: 'no-store' });
         if (!response.ok) {
           setStrategies([]);
           setSelected(null);
@@ -329,7 +323,7 @@ export default function Page() {
         }
         const liveStrategies = (await response.json()) as any[];
         const mapped: StrategyRecommendation[] = liveStrategies.map((s) => {
-          const legs = (s.legs ?? []).map((leg: any) => {
+          const legs: OptionLeg[] = (s.legs ?? []).map((leg: any) => {
             const premium = leg.price ?? 0;
             return {
               identifier: leg.identifier,
@@ -345,19 +339,19 @@ export default function Page() {
             };
           });
 
-          const strikesLabel = legs.map((l) => `${l.strike} ${l.optionType === 'CALL' ? 'CE' : 'PE'}`).join(' / ');
+          const strikesLabel = legs.map((l) => `${l.strike} ${optionCode(l.optionType)}`).join(' / ');
           const spot = s.spot_price ?? legs[0]?.strike ?? 0;
           const payoffPoints = buildPayoff(legs, spot);
           const plValues = payoffPoints.map((p) => p.pl);
           const maxProfit = plValues.length ? Math.max(...plValues) : 0;
           const maxLossAbs = plValues.length ? Math.abs(Math.min(...plValues)) : 0;
           const netPremium = legs.reduce(
-            (sum, leg) => sum + (leg.action === 'SELL' ? 1 : -1) * (leg.premium ?? 0) * LOT_SIZE,
+            (sum, leg) => sum + (leg.action === 'SELL' ? 1 : -1) * (leg.premium ?? 0) * MULTIPLIER,
             0
           );
           const expectedPl = Math.round(maxProfit || netPremium);
           const maxLoss = s.max_loss !== null && s.max_loss !== undefined
-            ? Math.round(Number(s.max_loss) * LOT_SIZE)
+            ? Math.round(Number(s.max_loss) * MULTIPLIER)
             : Math.round(maxLossAbs || Math.abs(netPremium) || 0);
           const riskReward = maxLoss ? expectedPl / (maxLoss || 1) : 1;
 
@@ -439,7 +433,7 @@ export default function Page() {
     setSendMessage(null);
     try {
       const payload = {
-        symbol: 'NIFTY',
+        symbol: 'SPX',
         nickname: selected.name,
         legs: selected.legs.map((leg) => ({
           identifier: leg.identifier,
@@ -546,7 +540,7 @@ export default function Page() {
                       </div>
                       <div className="flex flex-col items-end gap-1">
                         <p className={order.pnl >= 0 ? 'text-emerald-500 font-semibold' : 'text-rose-400 font-semibold'}>
-                          ₹{order.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                          {usd(order.pnl)}
                         </p>
                         <button
                           type="button"
@@ -564,7 +558,7 @@ export default function Page() {
                             {leg.side} {leg.quantity} × {leg.strike} {leg.option_type}
                           </span>
                           <span className={leg.pnl >= 0 ? 'text-emerald-500' : 'text-rose-400'}>
-                            ₹{leg.pnl.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                            {usd(leg.pnl)}
                           </span>
                         </div>
                       ))}

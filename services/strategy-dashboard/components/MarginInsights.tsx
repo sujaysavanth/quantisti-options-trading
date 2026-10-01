@@ -1,4 +1,5 @@
 import { dashboardMock } from '@/data/mockDashboard';
+import { usd, usdK } from '@/data/format';
 
 export function MarginInsights() {
   const best = dashboardMock.strategies[0];
@@ -20,7 +21,7 @@ export function MarginInsights() {
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/40 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Avg Margin</p>
-          <p className="text-3xl font-semibold mt-1">₹{(avgMargin / 1000).toFixed(0)}K</p>
+          <p className="text-3xl font-semibold mt-1">{usdK(avgMargin)}</p>
         </div>
         <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/40 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Best RR</p>
@@ -29,7 +30,7 @@ export function MarginInsights() {
         </div>
         <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/40 p-4">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Expected Net</p>
-          <p className="text-3xl font-semibold mt-1">₹{best.expectedPl.toLocaleString('en-IN')}</p>
+          <p className="text-3xl font-semibold mt-1">{usd(best.expectedPl)}</p>
           <p className="text-xs text-slate-500 dark:text-slate-400">Score {best.score}</p>
         </div>
       </div>
