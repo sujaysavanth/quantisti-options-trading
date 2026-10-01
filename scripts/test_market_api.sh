@@ -20,13 +20,13 @@ curl -s "$BASE_URL/" | jq
 echo ""
 
 # Test 3: Get spot price
-echo "3️⃣  Testing Nifty spot price..."
-curl -s "$BASE_URL/v1/nifty/spot" | jq
+echo "3️⃣  Testing SPX spot price..."
+curl -s "$BASE_URL/v1/underlying/spot" | jq
 echo ""
 
 # Test 4: Get historical data (last 30 days)
 echo "4️⃣  Testing historical candles (1 month)..."
-curl -s "$BASE_URL/v1/nifty/candles/1m" | jq '.symbol, .count, .start_date, .end_date, .data[0]'
+curl -s "$BASE_URL/v1/underlying/candles/1m" | jq '.symbol, .count, .start_date, .end_date, .data[0]'
 echo ""
 
 # Test 5: Get option chain

@@ -17,7 +17,7 @@ All components have been fully implemented and integrated.
 - ✅ `fetch_data_for_week()` - Gets data for a specific week
 - ✅ `fetch_data_with_lookback()` - Gets data with historical lookback for indicators
 
-**Integration:** Connects to market service at `http://market:8081/v1/nifty/historical`
+**Integration:** Connects to market service at `http://market:8081/v1/underlying/historical`
 
 ---
 

@@ -125,7 +125,7 @@ Once market data integration is done:
 curl -X POST http://localhost:8085/v1/features/compute \
   -H "Content-Type: application/json" \
   -d '{
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "week_start_date": "2024-01-01T00:00:00",
     "force_recompute": false
   }'

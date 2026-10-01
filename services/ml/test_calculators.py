@@ -86,7 +86,7 @@ def test_volatility_features():
 
 if __name__ == "__main__":
     print("\n🧪 Feature Calculator Test Suite")
-    print("Testing with sample NIFTY-like data (30 days)")
+    print("Testing with sample index data (30 days)")
 
     try:
         test_price_features()

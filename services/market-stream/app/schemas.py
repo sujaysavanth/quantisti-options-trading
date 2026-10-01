@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class OptionLegQuote(BaseModel):
-    identifier: str = Field(..., description="Unique option identifier, e.g., NIFTY25NOV19500PE")
+    identifier: str = Field(..., description="Unique option identifier (OCC symbol), e.g., SPXW261002P07600000")
     strike: float
     option_type: Literal["CALL", "PUT"]
     expiry: date
@@ -18,7 +18,7 @@ class OptionLegQuote(BaseModel):
 
 
 class QuoteUpsert(BaseModel):
-    symbol: str = Field(..., description="Underlying symbol, e.g., NIFTY")
+    symbol: str = Field(..., description="Underlying symbol, e.g., SPX")
     last_price: float = Field(..., ge=0)
     change: Optional[float] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)

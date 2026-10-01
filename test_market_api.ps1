@@ -20,9 +20,9 @@ try {
 }
 
 # Test 2: Get Latest Spot Price
-Write-Host "Test 2: Get Latest Nifty Spot Price" -ForegroundColor Yellow
+Write-Host "Test 2: Get Latest SPX Spot Price" -ForegroundColor Yellow
 try {
-    $response = Invoke-RestMethod -Uri "$baseUrl/v1/nifty/spot" -Method Get
+    $response = Invoke-RestMethod -Uri "$baseUrl/v1/underlying/spot" -Method Get
     Write-Host "✅ Spot price retrieved" -ForegroundColor Green
     Write-Host ($response | ConvertTo-Json -Depth 3)
     Write-Host ""
@@ -36,7 +36,7 @@ Write-Host "Test 3: Get Historical Data (Last 30 days)" -ForegroundColor Yellow
 try {
     $endDate = (Get-Date).ToString("yyyy-MM-dd")
     $startDate = (Get-Date).AddDays(-30).ToString("yyyy-MM-dd")
-    $response = Invoke-RestMethod -Uri "$baseUrl/v1/nifty/historical?start_date=$startDate&end_date=$endDate" -Method Get
+    $response = Invoke-RestMethod -Uri "$baseUrl/v1/underlying/historical?start_date=$startDate&end_date=$endDate" -Method Get
     Write-Host "✅ Historical data retrieved ($($response.data.Count) records)" -ForegroundColor Green
     Write-Host "First record:" ($response.data[0] | ConvertTo-Json -Depth 3)
     Write-Host ""
@@ -48,7 +48,7 @@ try {
 # Test 4: Get 1 Month Candles
 Write-Host "Test 4: Get 1 Month Candles" -ForegroundColor Yellow
 try {
-    $response = Invoke-RestMethod -Uri "$baseUrl/v1/nifty/candles/1m" -Method Get
+    $response = Invoke-RestMethod -Uri "$baseUrl/v1/underlying/candles/1m" -Method Get
     Write-Host "✅ 1 month candles retrieved ($($response.data.Count) candles)" -ForegroundColor Green
     Write-Host ""
 } catch {
@@ -62,7 +62,7 @@ try {
     $response = Invoke-RestMethod -Uri "$baseUrl/v1/options/chain" -Method Get
     Write-Host "✅ Option chain retrieved" -ForegroundColor Green
     Write-Host "Symbol: $($response.symbol)"
-    Write-Host "Spot Price: ₹$($response.spot_price)"
+    Write-Host "Spot Price: $$($response.spot_price)"
     Write-Host "Date: $($response.date)"
     Write-Host "Expiry: $($response.expiry_date)"
     Write-Host "Options count: $($response.options.Count)"
@@ -77,7 +77,7 @@ try {
 Write-Host "Test 6: Get Specific Strike (ATM)" -ForegroundColor Yellow
 try {
     # First get the spot price to calculate ATM strike
-    $spotResponse = Invoke-RestMethod -Uri "$baseUrl/v1/nifty/spot" -Method Get
+    $spotResponse = Invoke-RestMethod -Uri "$baseUrl/v1/underlying/spot" -Method Get
     $spotPrice = $spotResponse.price  # Changed from .close to .price
     $atmStrike = [Math]::Round($spotPrice / 50) * 50  # Round to nearest 50
 

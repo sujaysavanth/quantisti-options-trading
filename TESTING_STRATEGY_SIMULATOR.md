@@ -1,12 +1,14 @@
 # Strategy Simulator - Testing Guide
 
+> **Note:** the project moved from NIFTY to SPX. Commands and endpoints below are current; sample *output* values (prices, strikes, P&L) were captured on the NIFTY version and will differ.
+
 Complete guide to test the Strategy Simulator service for backtesting option trading strategies.
 
 ## Prerequisites
 
 ✅ **Already Running:**
 - PostgreSQL (port 5432) - `quantisti-postgres` container
-- Market Data Service (port 8081) - with Nifty historical data (2015-2025)
+- Market Data Service (port 8081) - with SPX historical data (2015-2025)
 
 ✅ **To Start:**
 - Strategy Simulator Service (port 8082)
@@ -43,8 +45,8 @@ docker exec -it quantisti-postgres psql -U quantisti -d quantisti -c "\dt"
 - `backtest_trades`
 - `backtest_trade_legs`
 - `backtest_metrics`
-- `nifty_historical` (from Market Data)
-- `nifty_option_chain` (from Market Data)
+- `underlying_daily` (from Market Data)
+- `option_chain_snapshots` (from Market Data)
 
 ---
 
@@ -98,14 +100,14 @@ curl http://localhost:8082/v1/strategies
       "legs": [
         {
           "action": "BUY",
-          "option_type": "CE",
+          "option_type": "C",
           "strike_offset": 0,
           "quantity": 1,
           "leg_order": 1
         },
         {
           "action": "BUY",
-          "option_type": "PE",
+          "option_type": "P",
           "strike_offset": 0,
           "quantity": 1,
           "leg_order": 2
@@ -255,7 +257,7 @@ curl "http://localhost:8082/v1/backtests/$backtestId/trades"
       "exit_spot_price": 21507.6,
       "entry_premium": -263.17,  // Negative = debit (we paid)
       "exit_premium": 269.46,     // Positive = credit (we received)
-      "pnl": 6.29,                // ₹6.29 profit per lot
+      "pnl": 6.29,                // $6.29 profit per lot
       "pnl_pct": 2.39,            // 2.39% return
       "status": "CLOSED",
       "exit_reason": "EXPIRY",
@@ -263,7 +265,7 @@ curl "http://localhost:8082/v1/backtests/$backtestId/trades"
       "legs": [
         {
           "action": "BUY",
-          "option_type": "CE",
+          "option_type": "C",
           "strike": 21250.0,
           "entry_price": 140.32,
           "exit_price": 257.6,
@@ -271,7 +273,7 @@ curl "http://localhost:8082/v1/backtests/$backtestId/trades"
         },
         {
           "action": "BUY",
-          "option_type": "PE",
+          "option_type": "P",
           "strike": 21250.0,
           "entry_price": 122.85,
           "exit_price": 11.86,
@@ -429,7 +431,7 @@ http://localhost:8082/redoc
 - [ ] Metrics include P&L, win rate, max drawdown
 - [ ] Can run multiple strategies (Straddle, Strangle, Spreads)
 - [ ] Weekly and Monthly entry logic works
-- [ ] Results are realistic (based on real Nifty data)
+- [ ] Results are realistic (based on real SPX data)
 
 ---
 
@@ -456,9 +458,9 @@ For a **Short Straddle** on **range-bound days**:
 
 ### **Error: "No historical data found"**
 - Ensure Market Data service is running on port 8081
-- Verify nifty_historical table has data:
+- Verify underlying_daily table has data:
   ```powershell
-  docker exec -it quantisti-postgres psql -U quantisti -d quantisti -c "SELECT COUNT(*) FROM nifty_historical;"
+  docker exec -it quantisti-postgres psql -U quantisti -d quantisti -c "SELECT COUNT(*) FROM underlying_daily;"
   ```
 
 ### **Backtest stuck in RUNNING status**
@@ -496,6 +498,6 @@ Now that Strategy Simulator is working, you can:
 **Dependencies:** Market Data Service (port 8081)
 **Strategies:** 8 pre-built + unlimited custom
 **Metrics:** 15+ performance indicators
-**Data Range:** 2015-2025 (real Nifty data)
+**Data Range:** 2015-2025 (real SPX data)
 
 🎉 **Strategy Simulator is fully operational!**

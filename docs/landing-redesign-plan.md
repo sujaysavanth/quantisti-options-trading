@@ -7,7 +7,7 @@ Goal: portfolio showpiece. Sample/illustrative numbers are fine.
 
 | Current | Problem vs. Apple style | New |
 |---|---|---|
-| `Hero.tsx` — two tilted floating cards, gradient text, badge, 3 trust icons, stats row | Busy; the product isn't shown; gradient text everywhere | Full-viewport black hero, one headline, live interactive NIFTY payoff curve as the "product shot" |
+| `Hero.tsx` — two tilted floating cards, gradient text, badge, 3 trust icons, stats row | Busy; the product isn't shown; gradient text everywhere | Full-viewport black hero, one headline, live interactive SPX payoff curve as the "product shot" |
 | `Features.tsx` — 8 icon cards, 8 different icon colors | Generic SaaS grid; colors compete | Replaced by 4 full-screen showcase sections + one bento grid with real UI crops |
 | `HowItWorks.tsx` — 4 numbered cards | Static | Scroll-pinned pipeline that assembles as you scroll |
 | `About.tsx` — text + stat cards + tech chips | Wordy | "Under the hood" spec table (Apple tech-specs style) |
@@ -21,16 +21,16 @@ Goal: portfolio showpiece. Sample/illustrative numbers are fine.
 
 ## 2. New page flow
 
-Content anchors on what the platform actually does: **NIFTY weekly options**, ML range prediction, strategy recommendations, paper trading, risk.
+Content anchors on what the platform actually does: **SPX options** (daily expiries), ML range prediction, strategy recommendations, paper trading, risk.
 
 1. **Nav** — `Quantisti` · Chain · Strategies · Signals · Risk · Tech · `[Open dashboard]`
 2. **Hero** (black) — eyebrow "Quantisti"; headline **"Options, explained."**; sub "Predict the week's range. Pick the strategy. See exactly why."; `Open dashboard` pill + `View on GitHub ›`. Below: large payoff curve that draws in, with shaded profit/loss zones and a draggable spot marker updating P/L.
-3. **Predicted range** (black, sticky 250vh) — NIFTY price line; as you scroll the ML-predicted weekly band (lower/upper, confidence) fades in, then the closing estimate dot lands. Big numbers: "±1.8% range · 72% confidence".
+3. **Predicted range** (black, sticky 250vh) — SPX price line; as you scroll the ML-predicted weekly band (lower/upper, confidence) fades in, then the closing estimate dot lands. Big numbers: "±1.8% range · 72% confidence".
 4. **Options chain** (light `#f5f5f7`) — "Every strike. At a glance." Chain table rises and scales into view; three callouts: Greeks, IV per expiry, PCR.
 5. **Strategy recommendations** (black, sticky) — pinned payoff chart on the left; scrolling steps on the right cycle through Iron Condor → Bull Call Spread → Short Strangle; the curve morphs between shapes, win-probability / risk-reward numbers count to new values.
 6. **Explainability** (light) — "The model shows its work." SHAP waterfall bars grow one by one (VIX, OI-PCR, trend, IV rank, …).
 7. **Risk** (black) — return histogram with VaR/CVaR lines sliding in; Sharpe, Sortino, Max DD as huge numbers.
-8. **How it works** (light, sticky) — pipeline: NSE/Yahoo data → Market service → ML service → Simulator → Dashboard; nodes light up with scroll progress.
+8. **How it works** (light, sticky) — pipeline: Yahoo/CBOE/FRED data → Market service → ML service → Simulator → Dashboard; nodes light up with scroll progress.
 9. **Highlights bento** (black) — 6 tiles: payoff, Greeks, paper trading, backtests, SHAP, cloud-native.
 10. **Under the hood** (light) — spec table: services, stack, data sources, model, deployment (Cloud Run, Terraform, GitHub Actions).
 11. **Final CTA** (black) — "Trade the week, on paper." + pill.
@@ -58,7 +58,7 @@ Content anchors on what the platform actually does: **NIFTY weekly options**, ML
 
 - **Charts**: hand-built SVG components (payoff, range band, SHAP bars, histogram, pipeline) — crisp, themeable, animatable, tiny.
 - **Payoff math**: `landing/lib/payoff.ts` — expiry payoff for multi-leg strategies on a price grid (reuses the leg shape from `services/strategy-dashboard/data/mockDashboard.ts`).
-- **Sample data**: `landing/data/showcase.ts` — NIFTY spot, predicted range, 3 strategies with legs, Greeks, SHAP values, return series. Illustrative values.
+- **Sample data**: `landing/data/showcase.ts` — SPX spot, predicted range, 3 strategies with legs, Greeks, SHAP values, return series. Illustrative values.
 - **UI shots**: real screenshots of `services/strategy-dashboard` (`/` and `/paper`) captured at 2x into `landing/public/shots/` for the chain/bento sections.
 - **3D (optional, phase 5)**: an IV surface or P/L-over-time surface as the hero backdrop. Two routes:
   - `@react-three/fiber` — live, rotatable in-browser, no extra tooling. **Preferred.**

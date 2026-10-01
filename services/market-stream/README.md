@@ -1,6 +1,6 @@
 # Market Stream Service
 
-Low-latency quote distribution layer that sits between raw data collectors (broker/NSE feeds, Alpha Vantage 1‑minute polling, etc.) and every component that needs “live” prices (paper-trading simulator, strategy dashboard).
+Low-latency quote distribution layer that sits between raw data collectors (Yahoo index polling, broker feeds, mock publishers) and every component that needs “live” prices (paper-trading simulator, strategy dashboard).
 
 ## Features
 
@@ -29,7 +29,7 @@ docker run -p 8090:8090 quantisti-market-stream
 Use the included helper script to push mock ticks:
 
 ```bash
-python scripts/mock_quote_publisher.py --symbol NIFTY --price 19800
+python scripts/mock_quote_publisher.py --symbol SPX --price 7650 --legs SPXW:7600:PUT SPXW:7700:CALL
 ```
 
 or POST manually:
@@ -38,11 +38,11 @@ or POST manually:
 curl -X POST http://localhost:8090/v1/quotes \
   -H "Content-Type: application/json" \
   -d '{
-        "symbol": "NIFTY",
+        "symbol": "SPX",
         "last_price": 19812.35,
         "timestamp": "2025-11-18T10:32:00Z",
         "legs": [
-          {"identifier": "NIFTY25NOV19500PE", "strike": 19500, "option_type": "PUT", "expiry": "2025-11-25", "bid": 142.5, "ask": 145.0, "last": 143.1}
+          {"identifier": "SPXW261002P07600000", "strike": 7600, "option_type": "PUT", "expiry": "2026-10-02", "bid": 142.5, "ask": 145.0, "last": 143.1}
         ]
       }'
 ```
@@ -53,7 +53,7 @@ Clients can subscribe to ws://localhost:8090/ws/quotes to receive:
 {
   "type": "quote",
   "data": {
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "last_price": 19812.35,
     "timestamp": "2025-11-18T10:32:00+00:00",
     "legs": [...]
@@ -63,39 +63,23 @@ Clients can subscribe to ws://localhost:8090/ws/quotes to receive:
 
 ## Next Steps
 
-- Wire in actual collectors (Alpha Vantage minute polling, broker websocket adapter).
+- Wire in a real-time options feed (broker websocket or a paid OPRA provider) behind the same `POST /v1/quotes` contract.
 - Persist optional short rolling window per instrument if the dashboard needs tiny charts.
 - Authenticate REST/WebSocket calls once integrated behind the gateway.
 
-### Alpha Vantage Collector (US symbols)
-
-Set your API key in `.env.development` (`ALPHAVANTAGE_API_KEY=...`) and run:
-
-```bash
-python scripts/alpha_vantage_collector.py \
-  --symbol SPY \
-  --market-stream-url http://localhost:8090
-```
-
-Add `--oneshot` for a single fetch or let it run continuously (default 60s). Alpha Vantage intraday does not cover NIFTY; use Yahoo or broker feeds for Indian symbols.
-
-### Yahoo Finance Collector (NIFTY-friendly)
+### Yahoo Finance Collector (S&P 500 index)
 
 ```bash
 python scripts/yahoo_collector.py \
-  --symbol ^NSEI \
+  --symbol ^GSPC \
+  --push-symbol SPX \
   --market-stream-url http://localhost:8090
 ```
 
-Adjust `--interval`/`--range` to taste. Yahoo’s feed is undocumented and throttled, so keep polls to ~60s.
+Adjust `--interval`/`--range` to taste. Yahoo's feed is undocumented and throttled, so keep polls to ~60s.
 
-### NSE Option Chain Collector (leg quotes)
+### Option leg quotes
 
-```bash
-python scripts/nse_option_chain_collector.py \
-  --symbol NIFTY \
-  --market-stream-url http://localhost:8090 \
-  --max-legs 200
-```
-
-This polls the public NSE option-chain JSON (updates every few minutes) and pushes the underlying price plus the most recent option leg quotes (bid/ask/last, IV). Increase `--max-legs` to include more strikes, but be mindful of payload sizes.
+There is no free real-time SPX option feed. Use `scripts/mock_quote_publisher.py` (above) to push legs for
+local development; end-of-day listed chains are collected separately by `scripts/spx_chain_snapshot.py`
+into Postgres for the market service.

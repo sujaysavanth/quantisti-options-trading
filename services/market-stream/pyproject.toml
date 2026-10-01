@@ -1,7 +1,7 @@
 [project]
 name = "market-stream"
 version = "0.1.0"
-description = "Streaming quote service for pushing live Nifty/option data to simulators and UIs"
+description = "Streaming quote service for pushing live SPX/option data to simulators and UIs"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.109.0",

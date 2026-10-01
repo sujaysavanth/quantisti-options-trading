@@ -1,5 +1,7 @@
 # ML Features Service - Testing Guide
 
+> **Note:** the project moved from NIFTY to SPX. Commands and endpoints below are current; sample *output* values (prices, strikes, P&L) were captured on the NIFTY version and will differ.
+
 ## Complete End-to-End Testing
 
 This guide will walk you through testing the fully implemented ML Features Service.
@@ -70,7 +72,7 @@ Invoke-RestMethod -Uri "http://localhost:8085/v1/features/compute" `
   -Method Post `
   -ContentType "application/json" `
   -Body '{
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "week_start_date": "2024-01-01T00:00:00",
     "force_recompute": false
   }'
@@ -81,7 +83,7 @@ Invoke-RestMethod -Uri "http://localhost:8085/v1/features/compute" `
 curl -X POST http://localhost:8085/v1/features/compute \
   -H "Content-Type: application/json" \
   -d '{
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "week_start_date": "2024-01-01T00:00:00",
     "force_recompute": false
   }'
@@ -92,7 +94,7 @@ curl -X POST http://localhost:8085/v1/features/compute \
 {
   "features": {
     "week_start_date": "2024-01-01T00:00:00",
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "price_features": {
       "weekly_change_pct": 2.35,
       "weekly_high_low_range_pct": 4.12,
@@ -129,12 +131,12 @@ After computing features for a week, retrieve them:
 
 ### PowerShell:
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8085/v1/features/weekly/NIFTY/2024-01-01T00:00:00"
+Invoke-RestMethod -Uri "http://localhost:8085/v1/features/weekly/SPX/2024-01-01T00:00:00"
 ```
 
 ### curl:
 ```bash
-curl http://localhost:8085/v1/features/weekly/NIFTY/2024-01-01T00:00:00
+curl http://localhost:8085/v1/features/weekly/SPX/2024-01-01T00:00:00
 ```
 
 **Expected:**
@@ -149,11 +151,11 @@ Same feature data as Test 3, but with message "Features retrieved successfully"
 ## Test 5: Get Latest Features
 
 ```bash
-curl http://localhost:8085/v1/features/latest/NIFTY
+curl http://localhost:8085/v1/features/latest/SPX
 ```
 
 **Expected:**
-Returns the most recently computed features for NIFTY.
+Returns the most recently computed features for SPX.
 
 ---
 
@@ -163,20 +165,20 @@ This will compute features for multiple weeks in the background.
 
 ### PowerShell:
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8085/v1/features/backfill?symbol=NIFTY&start_date=2024-01-01T00:00:00&end_date=2024-02-01T00:00:00&interval_days=7" `
+Invoke-RestMethod -Uri "http://localhost:8085/v1/features/backfill?symbol=SPX&start_date=2024-01-01T00:00:00&end_date=2024-02-01T00:00:00&interval_days=7" `
   -Method Post
 ```
 
 ### curl:
 ```bash
-curl -X POST "http://localhost:8085/v1/features/backfill?symbol=NIFTY&start_date=2024-01-01T00:00:00&end_date=2024-02-01T00:00:00&interval_days=7"
+curl -X POST "http://localhost:8085/v1/features/backfill?symbol=SPX&start_date=2024-01-01T00:00:00&end_date=2024-02-01T00:00:00&interval_days=7"
 ```
 
 **Expected Response:**
 ```json
 {
   "status": "started",
-  "message": "Backfill started for NIFTY from 2024-01-01 to 2024-02-01",
+  "message": "Backfill started for SPX from 2024-01-01 to 2024-02-01",
   "estimated_weeks": 4,
   "note": "Check logs for progress. Features will be available as they're computed."
 }
@@ -189,10 +191,10 @@ docker compose logs ml -f
 
 You'll see logs like:
 ```
-Starting backfill for NIFTY from 2024-01-01 to 2024-02-01
-Computing features for NIFTY week 2024-01-01
+Starting backfill for SPX from 2024-01-01 to 2024-02-01
+Computing features for SPX week 2024-01-01
 ✓ Saved features for 2024-01-01
-Computing features for NIFTY week 2024-01-08
+Computing features for SPX week 2024-01-08
 ✓ Saved features for 2024-01-08
 ...
 Backfill complete: 4 succeeded, 0 failed
@@ -219,10 +221,10 @@ Then run:
 -- Count features
 SELECT COUNT(*) FROM weekly_features;
 
--- View features for NIFTY
+-- View features for SPX
 SELECT week_start_date, symbol, weekly_change_pct, rsi_14, historical_vol_10d
 FROM weekly_features
-WHERE symbol = 'NIFTY'
+WHERE symbol = 'SPX'
 ORDER BY week_start_date DESC
 LIMIT 5;
 
@@ -244,7 +246,7 @@ Invoke-RestMethod -Uri "http://localhost:8085/v1/features/compute" `
   -Method Post `
   -ContentType "application/json" `
   -Body '{
-    "symbol": "NIFTY",
+    "symbol": "SPX",
     "week_start_date": "2024-01-01T00:00:00",
     "force_recompute": true
   }'
@@ -261,13 +263,13 @@ Invoke-RestMethod -Uri "http://localhost:8085/v1/features/compute" `
 Verify market service is providing data:
 
 ```bash
-curl "http://localhost:8081/v1/nifty/historical?start_date=2024-01-01&end_date=2024-01-05"
+curl "http://localhost:8081/v1/underlying/historical?start_date=2024-01-01&end_date=2024-01-05"
 ```
 
 **Expected:**
 ```json
 {
-  "symbol": "NIFTY",
+  "symbol": "SPX",
   "data": [
     {
       "date": "2024-01-01",
@@ -336,7 +338,7 @@ type services\ml\migrations\001_create_weekly_features_table.sql | docker compos
 Generate 1 year of weekly features (52 weeks):
 
 ```bash
-curl -X POST "http://localhost:8085/v1/features/backfill?symbol=NIFTY&start_date=2023-01-01T00:00:00&end_date=2024-01-01T00:00:00&interval_days=7"
+curl -X POST "http://localhost:8085/v1/features/backfill?symbol=SPX&start_date=2023-01-01T00:00:00&end_date=2024-01-01T00:00:00&interval_days=7"
 ```
 
 Monitor memory and CPU usage:
@@ -400,13 +402,13 @@ Write-Host "`n2. Computing features for 2024-01-01..." -ForegroundColor Yellow
 $result = Invoke-RestMethod -Uri "http://localhost:8085/v1/features/compute" `
   -Method Post `
   -ContentType "application/json" `
-  -Body '{"symbol": "NIFTY", "week_start_date": "2024-01-01T00:00:00", "force_recompute": false}'
+  -Body '{"symbol": "SPX", "week_start_date": "2024-01-01T00:00:00", "force_recompute": false}'
 
 Write-Host "Features computed: $($result.message)" -ForegroundColor Green
 
 # Test 3: Retrieve features
 Write-Host "`n3. Retrieving computed features..." -ForegroundColor Yellow
-$features = Invoke-RestMethod -Uri "http://localhost:8085/v1/features/weekly/NIFTY/2024-01-01T00:00:00"
+$features = Invoke-RestMethod -Uri "http://localhost:8085/v1/features/weekly/SPX/2024-01-01T00:00:00"
 
 Write-Host "RSI: $($features.features.technical_indicators.rsi_14)" -ForegroundColor Cyan
 Write-Host "Weekly Change: $($features.features.price_features.weekly_change_pct)%" -ForegroundColor Cyan

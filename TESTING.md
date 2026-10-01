@@ -1,6 +1,8 @@
 # Testing Guide - Market Data API
 
-Complete guide to test the Quantisti Market Data API with Nifty options pricing.
+> **Note:** the project moved from NIFTY to SPX. Commands and endpoints below are current; sample *output* values (prices, strikes, P&L) were captured on the NIFTY version and will differ.
+
+Complete guide to test the Quantisti Market Data API with SPX options pricing.
 
 ---
 
@@ -51,23 +53,23 @@ psql $DATABASE_URL -f schema/sql/004_market_data.sql
 ```bash
 psql $DATABASE_URL -c "\dt"
 ```
-You should see: `nifty_historical`, `nifty_option_chain` tables
+You should see: `underlying_daily`, `vix_daily`, `rates_daily`, `option_chain_snapshots` tables
 
 ---
 
-### Step 3: Populate Historical Nifty Data
+### Step 3: Populate Historical SPX Data
 
 ```bash
 # Install Python dependencies
 pip install yfinance psycopg2-binary pandas numpy
 
 # Download and populate data (2015-2024, ~10 years)
-python scripts/populate_nifty_data.py --start-date 2015-01-01
+python scripts/populate_us_data.py --start-date 2015-01-01
 ```
 
 **Expected output:**
 ```
-Downloading Nifty data from 2015-01-01 to 2024-12-31...
+Downloading ^GSPC from 2015-01-01 to 2024-12-31...
 [*********************100%%**********************]  1 of 1 completed
 Downloaded 2451 rows of data
 Calculating historical volatility...
@@ -76,13 +78,13 @@ Calculating historical volatility...
 📊 Database Summary:
    Total rows: 2451
    Date range: 2015-01-01 to 2024-12-31
-   Avg close: ₹15,234.67
+   Avg close: $15,234.67
    Avg volume: 234,567,890
 ```
 
 **Verify data exists:**
 ```bash
-psql $DATABASE_URL -c "SELECT COUNT(*), MIN(date), MAX(date) FROM nifty_historical;"
+psql $DATABASE_URL -c "SELECT COUNT(*), MIN(date), MAX(date) FROM underlying_daily;"
 ```
 
 Expected: ~2,450 rows, date range 2015-2024
@@ -173,8 +175,8 @@ Response:
   "endpoints": {
     "docs": "/docs",
     "health": "/health/healthz",
-    "nifty_spot": "/v1/nifty/spot",
-    "nifty_historical": "/v1/nifty/historical",
+    "spot": "/v1/underlying/spot",
+    "historical": "/v1/underlying/historical",
     "option_chain": "/v1/options/chain"
   }
 }
@@ -182,14 +184,14 @@ Response:
 
 ---
 
-**3. Get Nifty Spot Price**
+**3. Get SPX Spot Price**
 ```bash
-curl http://localhost:8081/v1/nifty/spot | jq
+curl http://localhost:8081/v1/underlying/spot | jq
 ```
 Response:
 ```json
 {
-  "symbol": "NIFTY",
+  "symbol": "SPX",
   "price": 21698.85,
   "timestamp": "2024-12-31T00:00:00",
   "change": null,
@@ -202,12 +204,12 @@ Response:
 
 **4. Get Historical Data (Specific Date Range)**
 ```bash
-curl "http://localhost:8081/v1/nifty/historical?start_date=2024-01-01&end_date=2024-01-31" | jq
+curl "http://localhost:8081/v1/underlying/historical?start_date=2024-01-01&end_date=2024-01-31" | jq
 ```
 Response:
 ```json
 {
-  "symbol": "NIFTY",
+  "symbol": "SPX",
   "count": 21,
   "start_date": "2024-01-01",
   "end_date": "2024-01-31",
@@ -230,10 +232,10 @@ Response:
 **5. Get Candles for Predefined Periods**
 ```bash
 # Last 1 month
-curl http://localhost:8081/v1/nifty/candles/1m | jq '.symbol, .count'
+curl http://localhost:8081/v1/underlying/candles/1m | jq '.symbol, .count'
 
 # Last 1 year
-curl http://localhost:8081/v1/nifty/candles/1y | jq '.symbol, .count'
+curl http://localhost:8081/v1/underlying/candles/1y | jq '.symbol, .count'
 
 # Available periods: 1d, 1w, 1m, 3m, 6m, 1y, 5y
 ```
@@ -249,7 +251,7 @@ curl "http://localhost:8081/v1/options/chain?strike_range=10" | jq
 Response:
 ```json
 {
-  "symbol": "NIFTY",
+  "symbol": "SPX",
   "spot_price": 21725.50,
   "date": "2024-12-31",
   "expiry_date": "2025-01-30",
@@ -259,7 +261,7 @@ Response:
   "options": [
     {
       "strike": 21700.0,
-      "option_type": "CE",
+      "option_type": "C",
       "expiry_date": "2025-01-30",
       "price": 156.25,
       "bid": 155.50,
@@ -280,7 +282,7 @@ Response:
     },
     {
       "strike": 21700.0,
-      "option_type": "PE",
+      "option_type": "P",
       "expiry_date": "2025-01-30",
       "price": 130.75,
       "greeks": { ... },
@@ -360,20 +362,20 @@ Here you can:
 
 ```bash
 # 1. Get historical spot price for Jan 15, 2024
-curl "http://localhost:8081/v1/nifty/historical?start_date=2024-01-15&end_date=2024-01-15" | jq '.data[0].close'
+curl "http://localhost:8081/v1/underlying/historical?start_date=2024-01-15&end_date=2024-01-15" | jq '.data[0].close'
 
 # 2. Get option chain for that date
 curl "http://localhost:8081/v1/options/chain?date=2024-01-15&strike_range=20" | jq > iron_condor.json
 
 # 3. Analyze the Greeks and prices in the JSON file
-cat iron_condor.json | jq '.options[] | select(.option_type == "CE") | {strike, price, delta}'
+cat iron_condor.json | jq '.options[] | select(.option_type == "C") | {strike, price, delta}'
 ```
 
 ### Scenario 2: Track Volatility Over Time
 
 ```bash
 # Get 1 year of data and extract volatility
-curl "http://localhost:8081/v1/nifty/candles/1y" | jq '.data[] | {date, close, historical_volatility}' > volatility.json
+curl "http://localhost:8081/v1/underlying/candles/1y" | jq '.data[] | {date, close, historical_volatility}' > volatility.json
 
 # You can now plot this data!
 ```
@@ -382,7 +384,7 @@ curl "http://localhost:8081/v1/nifty/candles/1y" | jq '.data[] | {date, close, h
 
 ```bash
 # Get current spot
-SPOT=$(curl -s http://localhost:8081/v1/nifty/spot | jq -r '.price')
+SPOT=$(curl -s http://localhost:8081/v1/underlying/spot | jq -r '.price')
 
 # Get option chain and filter for ATM (strike closest to spot)
 curl -s "http://localhost:8081/v1/options/chain?strike_range=3" | \
@@ -398,10 +400,10 @@ curl -s "http://localhost:8081/v1/options/chain?strike_range=3" | \
 **Solution:**
 ```bash
 # Re-run data population
-python scripts/populate_nifty_data.py --start-date 2015-01-01
+python scripts/populate_us_data.py --start-date 2015-01-01
 
 # Verify data
-psql $DATABASE_URL -c "SELECT COUNT(*) FROM nifty_historical;"
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM underlying_daily;"
 ```
 
 ### Issue: Database connection error
@@ -449,7 +451,7 @@ pip install scipy psycopg2-binary numpy fastapi uvicorn pydantic
 
 ```bash
 # Test spot price endpoint (1000 requests, 10 concurrent)
-ab -n 1000 -c 10 http://localhost:8081/v1/nifty/spot
+ab -n 1000 -c 10 http://localhost:8081/v1/underlying/spot
 
 # Test option chain generation (100 requests)
 ab -n 100 -c 5 "http://localhost:8081/v1/options/chain?strike_range=10"
@@ -483,9 +485,9 @@ Once you've verified the API works:
 | Endpoint | Purpose | Example |
 |----------|---------|---------|
 | `/health/healthz` | Health check | `curl localhost:8081/health/healthz` |
-| `/v1/nifty/spot` | Current price | `curl localhost:8081/v1/nifty/spot` |
-| `/v1/nifty/historical` | OHLCV data | `curl "localhost:8081/v1/nifty/historical?start_date=2024-01-01&end_date=2024-01-31"` |
-| `/v1/nifty/candles/{period}` | Quick historical | `curl localhost:8081/v1/nifty/candles/1m` |
+| `/v1/underlying/spot` | Current price | `curl localhost:8081/v1/underlying/spot` |
+| `/v1/underlying/historical` | OHLCV data | `curl "localhost:8081/v1/underlying/historical?start_date=2024-01-01&end_date=2024-01-31"` |
+| `/v1/underlying/candles/{period}` | Quick historical | `curl localhost:8081/v1/underlying/candles/1m` |
 | `/v1/options/chain` | Option chain | `curl "localhost:8081/v1/options/chain?strike_range=10"` |
 | `/v1/options/expiries` | Expiry dates | `curl localhost:8081/v1/options/expiries` |
 | `/docs` | API docs | Browser: `http://localhost:8081/docs` |
