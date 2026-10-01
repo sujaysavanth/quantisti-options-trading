@@ -11,7 +11,7 @@ export function Footer() {
           </p>
           <p>
             Figures shown on this page are illustrative. Option values are computed with Black-Scholes from sample market parameters; historical
-            index data is sourced from Yahoo Finance.
+            index data is sourced from Yahoo Finance, VIX from CBOE and rates from FRED.
           </p>
         </div>
         <div className="flex flex-col gap-3 pt-5 sm:flex-row sm:items-center sm:justify-between">

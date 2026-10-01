@@ -6,15 +6,16 @@
 import { price, greeks } from '@/lib/blackScholes'
 import { priceGrid, priceLegs, pnlAt, strategyStats, type Leg, type Market } from '@/lib/payoff'
 
+// A Monday close (spot = SPX's 30 Sep 2026 close) valued for that week's Friday expiry.
 export const market: Market = {
-  spot: 25480,
-  T: 7 / 365,
-  r: 0.065,
-  iv: 0.13,
-  lotSize: 75,
+  spot: 7651.54,
+  T: 4 / 365,
+  r: 0.0425,
+  iv: 0.14,
+  multiplier: 100,
 }
 
-export const expiryLabel = 'Tue, 6 Oct'
+export const expiryLabel = 'Fri, 2 Oct'
 
 // ---------------------------------------------------------------- strategies
 
@@ -31,12 +32,12 @@ const defs: StrategyDef[] = [
     id: 'iron-condor',
     name: 'Iron Condor',
     thesis: 'Range-bound',
-    blurb: 'Sell both wings, buy protection further out. Profits if NIFTY stays inside the range.',
+    blurb: 'Sell both wings, buy protection further out. Profits if SPX stays inside the range.',
     legs: [
-      { type: 'P', side: 1, strike: 24950 },
-      { type: 'P', side: -1, strike: 25150 },
-      { type: 'C', side: -1, strike: 25800 },
-      { type: 'C', side: 1, strike: 26000 },
+      { type: 'P', side: 1, strike: 7500 },
+      { type: 'P', side: -1, strike: 7550 },
+      { type: 'C', side: -1, strike: 7750 },
+      { type: 'C', side: 1, strike: 7800 },
     ],
   },
   {
@@ -45,8 +46,8 @@ const defs: StrategyDef[] = [
     thesis: 'Moderately bullish',
     blurb: 'Buy a call, sell a higher one. Capped upside, capped risk, cheaper than a naked call.',
     legs: [
-      { type: 'C', side: 1, strike: 25500 },
-      { type: 'C', side: -1, strike: 25800 },
+      { type: 'C', side: 1, strike: 7650 },
+      { type: 'C', side: -1, strike: 7725 },
     ],
   },
   {
@@ -55,37 +56,37 @@ const defs: StrategyDef[] = [
     thesis: 'Low volatility',
     blurb: 'Sell an OTM call and an OTM put. Collects the most premium — and carries open-ended risk.',
     legs: [
-      { type: 'P', side: -1, strike: 25100 },
-      { type: 'C', side: -1, strike: 25850 },
+      { type: 'P', side: -1, strike: 7525 },
+      { type: 'C', side: -1, strike: 7775 },
     ],
   },
 ]
 
-export const chartGrid = priceGrid(24700, 26260, 157)
+export const chartGrid = priceGrid(7350, 7950, 121)
 
 export const strategies = defs.map((d) => {
   const legs = priceLegs(d.legs, market)
-  const toRupees = (points: number) => points * market.lotSize
+  const toDollars = (points: number) => points * market.multiplier
   return {
     ...d,
     legs,
     stats: strategyStats(legs, market),
-    expiry: chartGrid.map((S) => toRupees(pnlAt(legs, S, 0, market.r, market.iv))),
-    today: chartGrid.map((S) => toRupees(pnlAt(legs, S, market.T * 0.6, market.r, market.iv))),
+    expiry: chartGrid.map((S) => toDollars(pnlAt(legs, S, 0, market.r, market.iv))),
+    today: chartGrid.map((S) => toDollars(pnlAt(legs, S, market.T * 0.6, market.r, market.iv))),
   }
 })
 
 export type Strategy = (typeof strategies)[number]
 
 /** Shared y-range so curves can morph between strategies without rescaling. */
-export const payoffDomain: [number, number] = [-26000, 22000]
+export const payoffDomain: [number, number] = [-17000, 6000]
 
 /** Tighter range for single-strategy charts (hero, thumbnails). */
-export const condorDomain: [number, number] = [-13000, 9000]
+export const condorDomain: [number, number] = [-4500, 2500]
 
 // ---------------------------------------------------------------- option chain
 
-const chainStrikes = priceGrid(25150, 25800, 14)
+const chainStrikes = priceGrid(7615, 7680, 14)
 
 function smileIv(K: number) {
   const m = Math.log(K / market.spot)
@@ -93,10 +94,11 @@ function smileIv(K: number) {
 }
 
 function openInterest(K: number, side: 'C' | 'P') {
-  const round = K % 500 === 0 ? 2.1 : K % 100 === 0 ? 1.4 : 1
-  const skew = side === 'C' ? (K > market.spot ? 1.3 : 0.6) : K < market.spot ? 1.3 : 0.6
-  const decay = Math.exp(-Math.abs(K - market.spot) / 900)
-  return 3_200_000 * round * skew * (0.5 + decay)
+  // SPX open interest is in contracts; it clusters at round strikes and puts carry more.
+  const round = K % 100 === 0 ? 2.1 : K % 25 === 0 ? 1.4 : 1
+  const skew = side === 'C' ? (K > market.spot ? 1.1 : 0.6) : K < market.spot ? 1.5 : 0.7
+  const decay = Math.exp(-Math.abs(K - market.spot) / 150)
+  return 4_000 * round * skew * (0.5 + decay)
 }
 
 export const chain = chainStrikes.map((K) => {
@@ -122,11 +124,13 @@ export const chain = chainStrikes.map((K) => {
 
 export const pcr = chain.reduce((s, r) => s + r.put.oi, 0) / chain.reduce((s, r) => s + r.call.oi, 0)
 
+// SPX lists an expiry every trading day; the chain above is the Friday weekly.
 export const expiries = [
-  { label: '6 Oct', dte: 7, iv: 0.13 },
-  { label: '13 Oct', dte: 14, iv: 0.134 },
-  { label: '20 Oct', dte: 21, iv: 0.138 },
-  { label: '27 Oct', dte: 28, iv: 0.141, monthly: true },
+  { label: '29 Sep', dte: 1 },
+  { label: '30 Sep', dte: 2 },
+  { label: '1 Oct', dte: 3 },
+  { label: '2 Oct', dte: 4, active: true },
+  { label: '16 Oct', dte: 18, monthly: true },
 ]
 
 // ---------------------------------------------------------------- seeded randomness
@@ -149,7 +153,7 @@ function gaussian(rand: () => number) {
 // ---------------------------------------------------------------- weekly range prediction
 
 const walk = mulberry32(7)
-const rawHistory: number[] = [24300]
+const rawHistory: number[] = [7280]
 for (let i = 1; i < 60; i++) {
   rawHistory.push(rawHistory[i - 1] * (1 + 0.0006 + 0.0075 * gaussian(walk)))
 }
@@ -162,7 +166,7 @@ const weeklySigma = market.iv * Math.sqrt(market.T)
 export const prediction = {
   lower: Math.round((market.spot * (1 - 1.08 * weeklySigma)) / 10) * 10,
   upper: Math.round((market.spot * (1 + 1.08 * weeklySigma)) / 10) * 10,
-  close: 25560,
+  close: 7690,
   confidence: 0.72,
   horizonDays: 5,
 }
@@ -173,12 +177,12 @@ export const shap = {
   question: 'P(week closes inside the range)',
   base: 0.41,
   features: [
-    { name: 'India VIX', value: '12.4', impact: 0.21 },
+    { name: 'VIX', value: '15.9', impact: 0.21 },
     { name: 'Put / call OI', value: pcr.toFixed(2), impact: 0.14 },
     { name: 'IV rank', value: '28', impact: 0.09 },
-    { name: 'Days to expiry', value: '7', impact: 0.05 },
-    { name: '10-day realised vol', value: '9.8%', impact: -0.04 },
-    { name: '20-day trend', value: '+2.1%', impact: -0.06 },
+    { name: 'Days to expiry', value: '4', impact: 0.05 },
+    { name: '10-day realised vol', value: '10.5%', impact: -0.04 },
+    { name: '20-day trend', value: '+1.6%', impact: -0.06 },
   ],
 }
 
@@ -228,7 +232,7 @@ export const risk = riskMetrics(weeklyReturns)
 // ---------------------------------------------------------------- architecture
 
 export const pipeline = [
-  { name: 'Collectors', detail: 'NSE · Yahoo · Alpha Vantage', port: 'scripts/' },
+  { name: 'Collectors', detail: 'Yahoo · CBOE · FRED', port: 'scripts/' },
   { name: 'Market', detail: 'Candles, chain, Black-Scholes Greeks', port: ':8081' },
   { name: 'Stream', detail: 'Live quotes over WebSocket', port: ':8090' },
   { name: 'ML', detail: 'Weekly features, range model', port: ':8085' },
@@ -249,8 +253,8 @@ export const services = [
 
 export const specs: { label: string; items: string[] }[] = [
   { label: 'Services', items: ['8 FastAPI microservices', 'Health and readiness probes on every service', 'Docker Compose for local, Cloud Run for deploy'] },
-  { label: 'Market data', items: ['NIFTY 50 daily history via Yahoo Finance', 'NSE and Alpha Vantage collectors', 'Option chains priced with Black-Scholes'] },
-  { label: 'Pricing', items: ['Black-Scholes European pricing', 'Delta, Gamma, Theta, Vega, Rho', 'Volatility smile across strikes'] },
+  { label: 'Market data', items: ['S&P 500 daily history via Yahoo Finance', 'CBOE VIX and FRED T-bill rates', 'Daily SPX chain snapshots, Black-Scholes when none exist'] },
+  { label: 'Pricing', items: ['Black-Scholes-Merton for European, cash-settled SPX', 'IV recomputed from mid quotes against a parity-implied forward', 'VIX-anchored volatility smile and NYSE expiry calendar'] },
   { label: 'Machine learning', items: ['Price, technical and volatility feature pipeline', 'XGBoost weekly range model', 'SHAP explanations per prediction'] },
   { label: 'Simulation', items: ['10+ multi-leg strategy templates', 'Asynchronous backtest engine', 'Paper trading marked to live quotes'] },
   { label: 'Risk', items: ['VaR and CVaR at 95%', 'Sharpe, Sortino, max drawdown', 'Win rate and payoff statistics'] },

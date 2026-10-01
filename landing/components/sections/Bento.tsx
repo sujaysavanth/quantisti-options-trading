@@ -5,7 +5,7 @@ import { CountUp } from '@/components/ui/CountUp'
 import { Reveal } from '@/components/ui/Reveal'
 import { Eyebrow, Headline, Section } from '@/components/ui/Section'
 import { chartGrid, market, condorDomain, risk, services, shap, strategies } from '@/data/showcase'
-import { inr, num, pc, pct } from '@/lib/format'
+import { num, pc, pct, usd } from '@/lib/format'
 
 const condor = strategies[0]
 const g = condor.stats.greeks
@@ -28,9 +28,9 @@ const equityPath = (() => {
 })()
 
 const paperOrders = [
-  { name: 'Iron Condor', legs: '24950 / 25150 / 25800 / 26000', pl: 2140 },
-  { name: 'Bull Call Spread', legs: '25500 / 25800', pl: -860 },
-  { name: 'Short Strangle', legs: '25100 / 25850', pl: 3375 },
+  { name: 'Iron Condor', legs: '7500 / 7550 / 7750 / 7800', pl: 640 },
+  { name: 'Bull Call Spread', legs: '7650 / 7725', pl: -410 },
+  { name: 'Short Strangle', legs: '7525 / 7775', pl: 890 },
 ]
 
 export function Bento() {
@@ -61,8 +61,8 @@ export function Bento() {
               {[
                 ['Delta', num(g.delta, 1).replace('-', '−')],
                 ['Gamma', num(g.gamma, 3).replace('-', '−')],
-                ['Theta', `${inr(g.theta, true)}/d`],
-                ['Vega', inr(g.vega, true)],
+                ['Theta', `${usd(g.theta, true)}/d`],
+                ['Vega', usd(g.vega, true)],
               ].map(([k, v]) => (
                 <div key={k}>
                   <dt className="text-xs text-muted">{k}</dt>
@@ -81,7 +81,7 @@ export function Bento() {
                     <p className="tabular truncate text-xs text-muted">{o.legs}</p>
                   </div>
                   <span className={`tabular shrink-0 font-semibold ${o.pl >= 0 ? 'text-gain' : 'text-loss'}`}>
-                    {o.pl >= 0 ? '▲' : '▼'} {inr(o.pl, true)}
+                    {o.pl >= 0 ? '▲' : '▼'} {usd(o.pl, true)}
                   </span>
                 </li>
               ))}

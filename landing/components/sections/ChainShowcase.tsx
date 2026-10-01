@@ -8,7 +8,7 @@ import { chain, expiries, market, pcr } from '@/data/showcase'
 import { num, pc, pct } from '@/lib/format'
 
 const maxOi = Math.max(...chain.flatMap((r) => [r.call.oi, r.put.oi]))
-const lakh = (v: number) => `${(v / 1e5).toFixed(1)}L`
+const thousands = (v: number) => `${(v / 1e3).toFixed(1)}K`
 
 const callouts = [
   { title: 'Greeks on every strike.', body: 'Delta, gamma, theta and vega from Black-Scholes, recomputed as spot moves.' },
@@ -39,17 +39,17 @@ export function ChainShowcase() {
         <div className="overflow-hidden rounded-tile bg-white shadow-[0_30px_80px_-20px_rgba(0,0,0,0.25)]">
           <div className="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 px-5 py-4 md:px-8">
             <div>
-              <p className="font-semibold">NIFTY 50</p>
+              <p className="font-semibold">SPX</p>
               <p className="tabular text-sm text-muted">
                 {num(market.spot)} · IV {pct(market.iv, 1)} · PCR {pcr.toFixed(2)}
               </p>
             </div>
             <div className="flex gap-2 overflow-x-auto" role="list" aria-label="Expiries">
-              {expiries.map((e, i) => (
+              {expiries.map((e) => (
                 <span
                   role="listitem"
                   key={e.label}
-                  className={`tabular whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${i === 0 ? 'bg-ink text-white' : 'bg-black/5 text-ink/70'}`}
+                  className={`tabular whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${e.active ? 'bg-ink text-white' : 'bg-black/5 text-ink/70'}`}
                 >
                   {e.label} · {e.dte}d{e.monthly ? ' · M' : ''}
                 </span>
@@ -59,7 +59,7 @@ export function ChainShowcase() {
 
           <div className="overflow-x-auto">
             <table className="tabular w-full text-right text-[13px] md:text-sm">
-              <caption className="sr-only">NIFTY option chain, weekly expiry</caption>
+              <caption className="sr-only">SPX option chain, Friday weekly expiry</caption>
               <thead className="text-xs text-muted">
                 <tr>
                   <th colSpan={4} scope="colgroup" className="px-3 pb-1 pt-4 text-center font-semibold uppercase tracking-wider text-ink/80 md:px-4">
@@ -152,7 +152,7 @@ function OiCell({ value, side, className = '' }: { value: number; side: 'call' |
         className={`absolute bottom-1 h-[3px] rounded-full bg-ink/15 ${side === 'call' ? 'right-3 md:right-4' : 'left-3 md:left-4'}`}
         style={{ width: pc((value / maxOi) * 0.75) }}
       />
-      <span className="relative">{lakh(value)}</span>
+      <span className="relative">{thousands(value)}</span>
     </td>
   )
 }

@@ -18,7 +18,8 @@ export interface Market {
   T: number
   r: number
   iv: number
-  lotSize: number
+  /** contract multiplier: $ per index point per contract */
+  multiplier: number
 }
 
 export function priceLegs(legs: Leg[], m: Market): PricedLeg[] {
@@ -39,11 +40,11 @@ export function priceGrid(lo: number, hi: number, n: number): number[] {
 }
 
 export interface StrategyStats {
-  /** ₹, negative = debit */
+  /** $, negative = debit */
   netPremium: number
-  /** ₹, null = unlimited */
+  /** $, null = unlimited */
   maxProfit: number | null
-  /** ₹ (positive number), null = unlimited */
+  /** $ (positive number), null = unlimited */
   maxLoss: number | null
   breakevens: number[]
   /** probability the position finishes in profit, under a lognormal terminal price */
@@ -86,7 +87,7 @@ export function strategyStats(legs: PricedLeg[], m: Market): StrategyStats {
   const net = legs.reduce(
     (g, l) => {
       const lg = greeks(l.type, m.spot, l.strike, m.T, m.r, m.iv)
-      const w = l.side * l.qty * m.lotSize
+      const w = l.side * l.qty * m.multiplier
       return {
         delta: g.delta + w * lg.delta,
         gamma: g.gamma + w * lg.gamma,
@@ -98,9 +99,9 @@ export function strategyStats(legs: PricedLeg[], m: Market): StrategyStats {
   )
 
   return {
-    netPremium: -legs.reduce((s, l) => s + l.side * l.qty * l.premium, 0) * m.lotSize,
-    maxProfit: unboundedUp ? null : Math.max(...ys) * m.lotSize,
-    maxLoss: unboundedDown ? null : -Math.min(...ys) * m.lotSize,
+    netPremium: -legs.reduce((s, l) => s + l.side * l.qty * l.premium, 0) * m.multiplier,
+    maxProfit: unboundedUp ? null : Math.max(...ys) * m.multiplier,
+    maxLoss: unboundedDown ? null : -Math.min(...ys) * m.multiplier,
     breakevens,
     pop: pop / mass,
     greeks: net,

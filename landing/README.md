@@ -21,7 +21,7 @@ Nav → Hero (interactive iron-condor payoff) → Weekly range prediction (scrol
 
 ## How the numbers work
 
-`data/showcase.ts` holds one sample NIFTY market (spot, IV, rate, days to expiry). Premiums, payoffs, Greeks, breakevens and probability of profit are computed from it with Black-Scholes (`lib/blackScholes.ts`, `lib/payoff.ts`), so the figures on the page agree with each other. Price history and backtest returns come from a seeded random generator, so they're stable between builds. All of it is illustrative, as the footer states.
+`data/showcase.ts` holds one sample SPX market (spot, IV, rate, days to expiry). Premiums, payoffs, Greeks, breakevens and probability of profit are computed from it with Black-Scholes (`lib/blackScholes.ts`, `lib/payoff.ts`), so the figures on the page agree with each other. Price history and backtest returns come from a seeded random generator, so they're stable between builds. All of it is illustrative, as the footer states.
 
 ## Conventions
 

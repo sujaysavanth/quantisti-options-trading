@@ -8,8 +8,8 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'sw
 export const metadata: Metadata = {
   title: 'Quantisti — Options, explained.',
   description:
-    'Predict the week’s NIFTY range, pick the options strategy, and see exactly why. ML signals with SHAP explanations, Black-Scholes pricing, backtests and paper trading.',
-  keywords: ['options trading', 'NIFTY', 'trading simulator', 'machine learning', 'SHAP', 'XGBoost', 'Black-Scholes'],
+    'Predict the week’s S&P 500 range, pick the SPX options strategy, and see exactly why. ML signals with SHAP explanations, Black-Scholes pricing, backtests and paper trading.',
+  keywords: ['options trading', 'SPX', 'S&P 500', '0DTE', 'trading simulator', 'machine learning', 'SHAP', 'XGBoost', 'Black-Scholes'],
   authors: [{ name: 'Sujay Govindappa Rajashekar', url: 'https://github.com/sujaysavanth' }],
   openGraph: {
     title: 'Quantisti — Options, explained.',

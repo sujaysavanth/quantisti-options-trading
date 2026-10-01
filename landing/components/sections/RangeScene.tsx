@@ -26,7 +26,7 @@ const bandBottom = sy(prediction.lower)
 const closeX = (lastX + W) / 2 + (W - lastX) * 0.15
 
 const steps = [
-  { title: 'Sixty sessions of NIFTY.', body: 'Daily candles, realised volatility and open interest feed a weekly feature set.' },
+  { title: 'Sixty sessions of the S&P 500.', body: 'Daily candles, realised volatility and open interest feed a weekly feature set.' },
   { title: 'The model draws the week’s range.', body: `A ${pct(prediction.confidence)}-confidence band for the next ${FUTURE} sessions, before a single trade is placed.` },
   { title: 'And calls the close.', body: 'A point estimate for expiry day, used to rank every strategy by fit.' },
 ]
@@ -78,7 +78,7 @@ function Stage({ progress }: { progress: MotionValue<number> }) {
 
       <div className="relative mt-6 w-full flex-1 md:mt-10">
         <div className="relative mx-auto h-full max-h-[440px] w-full">
-          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" role="img" aria-label={`NIFTY price history with predicted range ${num(prediction.lower)} to ${num(prediction.upper)}`}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" role="img" aria-label={`SPX price history with predicted range ${num(prediction.lower)} to ${num(prediction.upper)}`}>
             <line x1={lastX} x2={lastX} y1="0" y2={H} stroke="currentColor" strokeOpacity="0.15" vectorEffect="non-scaling-stroke" />
 
             <path d={linePath} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />

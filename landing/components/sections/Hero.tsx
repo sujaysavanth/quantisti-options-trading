@@ -7,7 +7,7 @@ import { CountUp } from '@/components/ui/CountUp'
 import { EASE } from '@/components/ui/Reveal'
 import { Section } from '@/components/ui/Section'
 import { chartGrid, expiryLabel, market, condorDomain, strategies } from '@/data/showcase'
-import { inr, num, pct } from '@/lib/format'
+import { num, pct, usd } from '@/lib/format'
 import { DASHBOARD_URL, GITHUB_URL, HAS_DASHBOARD } from '@/lib/links'
 
 const condor = strategies[0]
@@ -31,7 +31,7 @@ export function Hero() {
           Options, explained.
         </motion.h1>
         <motion.p {...rise(0.16)} className="mx-auto mt-5 max-w-[640px] text-lede text-balance text-muted">
-          Predict the week’s NIFTY range. Pick the strategy. See exactly why the model chose it.
+          Predict the week’s S&amp;P 500 range. Pick the strategy. See exactly why the model chose it.
         </motion.p>
         <motion.div {...rise(0.24)} className="mt-8 flex flex-col items-center justify-center gap-5 sm:flex-row sm:gap-8">
           <PillButton href={DASHBOARD_URL}>{HAS_DASHBOARD ? 'Open dashboard' : 'Explore the code'}</PillButton>
@@ -45,7 +45,7 @@ export function Hero() {
           <div>
             <p className="text-2xl font-semibold tracking-tight">{condor.name}</p>
             <p className="tabular text-sm text-muted">
-              NIFTY {num(market.spot)} · expires {expiryLabel}
+              SPX {num(market.spot)} · expires {expiryLabel}
             </p>
           </div>
           <div className="flex items-center gap-5 text-xs text-muted">
@@ -73,10 +73,10 @@ export function Hero() {
 
         <dl className="mt-12 grid grid-cols-2 gap-x-6 gap-y-10 border-t border-white/10 pt-10 text-center md:grid-cols-4">
           <HeroStat label="Max profit">
-            <CountUp value={stats.maxProfit ?? 0} format={(v) => inr(v)} className="text-gain" />
+            <CountUp value={stats.maxProfit ?? 0} format={(v) => usd(v)} className="text-gain" />
           </HeroStat>
           <HeroStat label="Max loss">
-            <CountUp value={stats.maxLoss ?? 0} format={(v) => inr(v)} className="text-loss" />
+            <CountUp value={stats.maxLoss ?? 0} format={(v) => usd(v)} className="text-loss" />
           </HeroStat>
           <HeroStat label="Breakevens">
             <span className="tabular">{stats.breakevens.map((b) => num(b)).join(' – ')}</span>

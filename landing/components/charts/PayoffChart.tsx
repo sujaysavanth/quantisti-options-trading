@@ -2,7 +2,7 @@
 
 import { motion } from 'motion/react'
 import { useId, useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react'
-import { inr, num, pc } from '@/lib/format'
+import { num, pc, usd } from '@/lib/format'
 import { EASE } from '@/components/ui/Reveal'
 
 const W = 1000
@@ -10,7 +10,7 @@ const W = 1000
 interface PayoffChartProps {
   /** Underlying prices, evenly spaced. */
   xs: number[]
-  /** P/L at expiry in ₹ for each x. Arrays of equal length morph smoothly when swapped. */
+  /** P/L at expiry in $ for each x. Arrays of equal length morph smoothly when swapped. */
   ys: number[]
   /** Optional P/L before expiry, drawn dashed. */
   today?: number[]
@@ -87,7 +87,9 @@ export function PayoffChart({
     }
   }
 
-  const ticks = xs.filter((x) => x % 500 === 0)
+  // Round tick spacing giving at most ~7 labels across the visible price range.
+  const tickStep = [25, 50, 100, 250, 500, 1000, 2500].find((s) => (x1 - x0) / s <= 7) ?? 5000
+  const ticks = xs.filter((x) => Math.abs(x % tickStep) < 1e-6)
   const pctX = (price: number) => pc(sx(price) / W)
   const pctY = (pl: number) => pc(sy(pl) / H)
   const transition = { duration: 0.9, ease: EASE }
@@ -107,7 +109,7 @@ export function PayoffChart({
           'aria-valuemin': Math.round(x0),
           'aria-valuemax': Math.round(x1),
           'aria-valuenow': Math.round(shown),
-          'aria-valuetext': `NIFTY ${num(shown)}, P/L at expiry ${inr(shownPl, true)}`,
+          'aria-valuetext': `SPX ${num(shown)}, P/L at expiry ${usd(shownPl, true)}`,
         })}
       >
         <svg
@@ -191,9 +193,9 @@ export function PayoffChart({
             <div
               className={`absolute left-0 top-0 whitespace-nowrap rounded-xl bg-white/10 px-3 py-2 text-left backdrop-blur-md ${sx(shown) > W * 0.7 ? '-translate-x-full -ml-3' : 'ml-3'}`}
             >
-              <div className="tabular text-xs text-muted">NIFTY {num(shown)}</div>
+              <div className="tabular text-xs text-muted">SPX {num(shown)}</div>
               <div className="tabular text-lg font-semibold" style={{ color: shownPl >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
-                {inr(shownPl, true)}
+                {usd(shownPl, true)}
               </div>
             </div>
           )}

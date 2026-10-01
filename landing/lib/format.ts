@@ -3,16 +3,16 @@ export function pc(fraction: number): string {
   return `${Number((fraction * 100).toFixed(3))}%`
 }
 
-const inrFmt = new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 })
+const usdFmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
 
-/** ₹12,34,567 style, with an explicit sign when `signed` is set. */
-export function inr(value: number, signed = false): string {
+/** $12,345 style, with an explicit sign when `signed` is set. */
+export function usd(value: number, signed = false): string {
   const sign = value < 0 ? '−' : signed && value > 0 ? '+' : ''
-  return `${sign}₹${inrFmt.format(Math.abs(Math.round(value)))}`
+  return `${sign}$${usdFmt.format(Math.abs(Math.round(value)))}`
 }
 
 export function num(value: number, digits = 0): string {
-  return new Intl.NumberFormat('en-IN', {
+  return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value)

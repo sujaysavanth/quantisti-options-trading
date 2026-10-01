@@ -8,7 +8,7 @@ import { EASE } from '@/components/ui/Reveal'
 import { Section } from '@/components/ui/Section'
 import { StickyScene } from '@/components/ui/StickyScene'
 import { chartGrid, market, payoffDomain, strategies } from '@/data/showcase'
-import { inr, num, pct } from '@/lib/format'
+import { num, pct, usd } from '@/lib/format'
 
 export function StrategyScene() {
   return (
@@ -81,19 +81,19 @@ function Stage({ progress }: { progress: MotionValue<number> }) {
 
           <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-white/10 pt-4 md:mt-8 md:gap-y-6 md:pt-6">
             <Stat label={credit ? 'Net credit' : 'Net debit'}>
-              <CountUp value={Math.abs(s.stats.netPremium)} format={(v) => inr(v)} duration={0.8} />
+              <CountUp value={Math.abs(s.stats.netPremium)} format={(v) => usd(v)} duration={0.8} />
             </Stat>
             <Stat label="Chance of profit">
               <CountUp value={s.stats.pop} format={(v) => pct(v)} duration={0.8} />
             </Stat>
             <Stat label="Max profit">
-              {s.stats.maxProfit === null ? <span>Unlimited</span> : <CountUp value={s.stats.maxProfit} format={(v) => inr(v)} duration={0.8} className="text-gain" />}
+              {s.stats.maxProfit === null ? <span>Unlimited</span> : <CountUp value={s.stats.maxProfit} format={(v) => usd(v)} duration={0.8} className="text-gain" />}
             </Stat>
             <Stat label="Max loss">
-              {s.stats.maxLoss === null ? <span className="text-loss">Unlimited</span> : <CountUp value={s.stats.maxLoss} format={(v) => inr(v)} duration={0.8} className="text-loss" />}
+              {s.stats.maxLoss === null ? <span className="text-loss">Unlimited</span> : <CountUp value={s.stats.maxLoss} format={(v) => usd(v)} duration={0.8} className="text-loss" />}
             </Stat>
           </dl>
-          <p className="mt-6 hidden text-xs text-muted md:block">Per lot of {market.lotSize}. Scroll to compare.</p>
+          <p className="mt-6 hidden text-xs text-muted md:block">Per contract (×{market.multiplier}). Scroll to compare.</p>
         </div>
       </div>
     </div>
