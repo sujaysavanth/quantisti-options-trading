@@ -32,6 +32,16 @@ def bs_price(spot: float, strike: float, T: float, rate: float, vol: float, q: f
     return disc_k * _norm_cdf(-d2) - disc_s * _norm_cdf(-d1)
 
 
+def bs_delta(spot: float, strike: float, T: float, rate: float, vol: float, q: float, option_type: str) -> float:
+    """dPrice/dSpot: 0..1 for calls, -1..0 for puts."""
+    if T <= 0:
+        itm = spot > strike if option_type == "C" else spot < strike
+        return (1.0 if option_type == "C" else -1.0) if itm else 0.0
+    d1 = (math.log(spot / strike) + (rate - q + 0.5 * vol * vol) * T) / (vol * math.sqrt(T))
+    carry = math.exp(-q * T)
+    return carry * _norm_cdf(d1) if option_type == "C" else carry * (_norm_cdf(d1) - 1)
+
+
 def implied_vol(price: Optional[float], spot: float, strike: float, T: float, rate: float, q: float,
                 option_type: str) -> Optional[float]:
     """Vol that reproduces `price`, or None when the price is outside no-arbitrage bounds.

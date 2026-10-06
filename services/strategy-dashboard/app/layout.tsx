@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { LiveQuoteProvider } from '@/components/LiveQuoteProvider';
+import { NavBar } from '@/components/NavBar';
 
 export const metadata: Metadata = {
   title: 'Quantisti Strategy Dashboard',
@@ -21,7 +23,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <LiveQuoteProvider>
+            <NavBar />
+            {children}
+          </LiveQuoteProvider>
         </ThemeProvider>
       </body>
     </html>

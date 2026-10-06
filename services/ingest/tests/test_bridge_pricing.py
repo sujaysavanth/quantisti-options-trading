@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from app.bridge.pricing import bs_price, implied_vol, infer_forward
+from app.bridge.pricing import bs_delta, bs_price, implied_vol, infer_forward
 
 S, T, R, Q = 6700.0, 7 / 365, 0.04, 0.013
 
@@ -23,6 +23,13 @@ def test_impossible_prices_have_no_iv():
     assert implied_vol(S, S, 6700, T, R, Q, "C") is None              # a call can't cost the index
     assert implied_vol(None, S, 6700, T, R, Q, "C") is None
     assert implied_vol(10.0, S, 6700, 0, R, Q, "C") is None           # expired
+
+
+def test_delta_ranges_and_parity():
+    c, p = bs_delta(S, 6700, T, R, 0.15, Q, "C"), bs_delta(S, 6700, T, R, 0.15, Q, "P")
+    assert 0.45 < c < 0.6 and -0.55 < p < -0.4
+    assert c - p == pytest.approx(math.exp(-Q * T))               # call delta - put delta = e^{-qT}
+    assert bs_delta(S, 6000, T, R, 0.15, Q, "C") > 0.99 and bs_delta(S, 7400, T, R, 0.15, Q, "P") < -0.99
 
 
 def test_forward_from_parity():

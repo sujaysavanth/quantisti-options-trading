@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ThemeToggle } from '@/components/ThemeToggle';
+import { useLiveQuote } from '@/components/LiveQuoteProvider';
+import { defaultExpiry, expiryLabel, pct, quoteExpiries } from '@/data/live';
 import { StrategySummary } from '@/components/StrategySummary';
 import { PayoffChart } from '@/components/PayoffChart';
 import { GreekStats } from '@/components/GreekStats';
@@ -234,29 +235,15 @@ const generateSummaryFromQuote = (quote: MarketQuoteSnapshot, fallbackExpiry: st
   };
 };
 
-// Where the live quotes come from, taken from the simulator's /v1/strategies-live response.
-type FeedInfo = {
-  source?: string;
-  delayMinutes?: number;
-  quotedAt?: string;
-  spot?: number;
-};
+/** The selected expiry lives in the URL (?expiry=2026-10-09) so a reload or shared link keeps it. */
+const readExpiryParam = () =>
+  typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('expiry');
 
-const SOURCE_LABELS: Record<string, string> = { cboe: 'CBOE', yahoo: 'Yahoo' };
-
-const feedLabel = (feed: FeedInfo) => {
-  const parts: string[] = [];
-  if (feed.delayMinutes) parts.push(`Delayed ${feed.delayMinutes} min`);
-  else if (feed.delayMinutes === 0) parts.push('Real-time');
-  if (feed.source) parts.push(SOURCE_LABELS[feed.source] ?? feed.source);
-  if (feed.quotedAt) {
-    const at = new Date(feed.quotedAt);
-    const opts: Intl.DateTimeFormatOptions = { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false };
-    const sameDay = at.toDateString() === new Date().toDateString();
-    if (!sameDay) Object.assign(opts, { month: 'short', day: 'numeric' });
-    parts.push(`as of ${at.toLocaleString('en-US', opts)} ET`);
-  }
-  return parts.join(' · ');
+const writeExpiryParam = (expiry: string | null) => {
+  const url = new URL(window.location.href);
+  if (expiry) url.searchParams.set('expiry', expiry);
+  else url.searchParams.delete('expiry');
+  window.history.replaceState(null, '', url);
 };
 
 interface PaperTrade {
@@ -288,8 +275,23 @@ export default function Page() {
   const [isSending, setIsSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [feed, setFeed] = useState<FeedInfo | null>(null);
   const [feedStatus, setFeedStatus] = useState<'loading' | 'live' | 'waiting'>('loading');
+  const { quote } = useLiveQuote();
+  const expiries = quoteExpiries(quote);
+  // null = "whatever the quote's default is"; set when the user picks one (or from ?expiry=).
+  const [expiry, setExpiry] = useState<string | null>(null);
+  const [expiryReady, setExpiryReady] = useState(false);
+
+  useEffect(() => {
+    setExpiry(readExpiryParam());
+    setExpiryReady(true);
+  }, []);
+
+  const handleExpiryChange = (value: string) => {
+    const next = value === defaultExpiry(quote) ? null : value;
+    setExpiry(next);
+    writeExpiryParam(next);
+  };
   const [summary, setSummary] = useState({
     weekOf: dashboardMock.weekOf,
     expiry: dashboardMock.expiry,
@@ -338,25 +340,27 @@ export default function Page() {
     return () => clearInterval(id);
   }, []);
 
-  // Fetch live strategies from simulator
+  // Fetch live strategies from simulator for the selected expiry
   useEffect(() => {
+    if (!expiryReady) return;
     const loadStrategies = async () => {
       try {
-        const response = await fetch(`${SIM_API}/v1/strategies-live?symbol=SPX`, { cache: 'no-store' });
+        const query = new URLSearchParams({ symbol: 'SPX' });
+        if (expiry) query.set('expiry', expiry);
+        const response = await fetch(`${SIM_API}/v1/strategies-live/?${query}`, { cache: 'no-store' });
+        if (response.status === 404 && expiry) {
+          // The chosen expiry has settled or isn't quoted any more: go back to the default.
+          setExpiry(null);
+          writeExpiryParam(null);
+          return;
+        }
         if (!response.ok) {
           setStrategies([]);
           setSelected(null);
-          setFeed(null);
           setFeedStatus('waiting');
           return;
         }
         const liveStrategies = (await response.json()) as any[];
-        const first = liveStrategies[0];
-        setFeed(
-          first
-            ? { source: first.source, delayMinutes: first.delay_minutes, quotedAt: first.quoted_at, spot: first.spot_price }
-            : null
-        );
         setFeedStatus(liveStrategies.length ? 'live' : 'waiting');
         const mapped: StrategyRecommendation[] = liveStrategies.map((s) => {
           const legs: OptionLeg[] = (s.legs ?? []).map((leg: any) => {
@@ -434,14 +438,13 @@ export default function Page() {
         console.error('Failed to load live strategies from simulator', err);
         setStrategies([]);
         setSelected(null);
-        setFeed(null);
         setFeedStatus('waiting');
       }
     };
     loadStrategies();
     const id = setInterval(loadStrategies, 30000);
     return () => clearInterval(id);
-  }, []);
+  }, [expiry, expiryReady]);
 
   useEffect(() => {
     fetchOrders();
@@ -525,19 +528,22 @@ export default function Page() {
               Insights generated from ML forecasts of price, volatility, and Greeks for the upcoming expiry.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {feedStatus === 'live' && feed && (
-              <span
-                className="inline-flex items-center gap-2 rounded-full border border-amber-300/60 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-                title="Free data source: option quotes lag the market"
+          {expiries.length > 0 && (
+            <label className="flex flex-col gap-1 text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Expiry
+              <select
+                value={expiry ?? defaultExpiry(quote) ?? ''}
+                onChange={(e) => handleExpiryChange(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm normal-case tracking-normal text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
-                {feed.spot ? `SPX ${feed.spot.toLocaleString('en-US', { maximumFractionDigits: 2 })} · ` : ''}
-                {feedLabel(feed)}
-              </span>
-            )}
-            <ThemeToggle />
-          </div>
+                {expiries.map((e) => (
+                  <option key={e.expiry} value={e.expiry}>
+                    {expiryLabel(e.expiry)} ({e.dte}d){e.atm_iv ? ` · IV ${pct(e.atm_iv)}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </header>
 
         <StrategySummary

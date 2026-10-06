@@ -88,8 +88,8 @@ class Bridge:
         try:
             self._post(quote)
             self.changed = False
-            log.info("posted SPX %.2f, %d legs, expiry %s, quoted %s",
-                     quote["last_price"], len(quote["legs"]), quote["legs"][0]["expiry"] if quote["legs"] else "-",
+            log.info("posted SPX %.2f, %d legs over %d expiries (default %s), quoted %s",
+                     quote["last_price"], len(quote["legs"]), len(quote["expiries"]), quote["default_expiry"],
                      quote["quoted_at"])
             return True
         except Exception as exc:             # market-stream down: keep `changed`, retry after POST_EVERY

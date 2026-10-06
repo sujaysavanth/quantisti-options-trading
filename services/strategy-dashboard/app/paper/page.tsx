@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usd } from '@/data/format';
+import { useLiveQuote } from '@/components/LiveQuoteProvider';
+import { defaultExpiry, expiryLabel, legMid, quoteExpiries } from '@/data/live';
 
 type QuoteMessage = {
   type: string;
@@ -44,15 +46,20 @@ interface PaperTrade {
   }>;
 }
 
-const defaultLeg = (): PaperLegForm => ({
-  strike: '19500',
+// Blank strike/expiry are filled from the live quote (ATM strike, default expiry) once it arrives.
+const defaultLeg = (strike = '', expiry = ''): PaperLegForm => ({
+  strike,
   option_type: 'CALL',
-  expiry: new Date().toISOString().slice(0, 10),
+  expiry,
   quantity: '1',
   side: 'SELL',
 });
 
 export default function PaperTradingPage() {
+  const { quote } = useLiveQuote();
+  const expiries = quoteExpiries(quote);
+  const atmStrike = quote ? String(Math.round(quote.last_price / 5) * 5) : '';
+  const liveExpiry = defaultExpiry(quote) ?? '';
   const [spot, setSpot] = useState<number | null>(null);
   const [orders, setOrders] = useState<PaperTrade[]>([]);
   const [symbol, setSymbol] = useState('SPX');
@@ -103,7 +110,18 @@ export default function PaperTradingPage() {
     setLegs((prev) => prev.map((leg, idx) => (idx === index ? { ...leg, [key]: value } : leg)));
   };
 
-  const handleAddLeg = () => setLegs((prev) => [...prev, defaultLeg()]);
+  useEffect(() => {
+    if (!atmStrike || !liveExpiry) return;
+    setLegs((prev) => prev.map((leg) => ({ ...leg, strike: leg.strike || atmStrike, expiry: leg.expiry || liveExpiry })));
+  }, [atmStrike, liveExpiry]);
+
+  // The live quote for a form leg, so the user sees what it would fill at before submitting.
+  const liveLeg = (leg: PaperLegForm) =>
+    quote?.legs.find(
+      (l) => l.strike === Number(leg.strike) && l.option_type === leg.option_type && l.expiry === leg.expiry
+    );
+
+  const handleAddLeg = () => setLegs((prev) => [...prev, defaultLeg(atmStrike, liveExpiry)]);
   const handleRemoveLeg = (index: number) => setLegs((prev) => prev.filter((_, idx) => idx !== index));
 
   const payloadLegs = useMemo(
@@ -137,7 +155,7 @@ export default function PaperTradingPage() {
         throw new Error(text || `Failed with status ${response.status}`);
       }
       setNickname('Weekly strategy');
-      setLegs([defaultLeg()]);
+      setLegs([defaultLeg(atmStrike, liveExpiry)]);
       fetchOrders();
     } catch (err: any) {
       console.error(err);
@@ -157,7 +175,7 @@ export default function PaperTradingPage() {
             Live quotes from Market Stream with simulated trades stored in the simulator service.
           </p>
           <div className="text-lg font-semibold text-emerald-400">
-            {spot ? `${symbol} ${spot.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Waiting for quotes...'}
+            {(spot ?? quote?.last_price) ? `${symbol} ${(spot ?? quote?.last_price ?? 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Waiting for quotes...'}
           </div>
         </header>
 
@@ -208,12 +226,26 @@ export default function PaperTradingPage() {
                 </label>
                 <label className="text-xs uppercase text-slate-500">
                   Expiry
-                  <input
-                    type="date"
-                    value={leg.expiry}
-                    onChange={(e) => handleLegChange(index, 'expiry', e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1"
-                  />
+                  {expiries.length ? (
+                    <select
+                      value={leg.expiry}
+                      onChange={(e) => handleLegChange(index, 'expiry', e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1"
+                    >
+                      {expiries.map((e) => (
+                        <option key={e.expiry} value={e.expiry}>
+                          {expiryLabel(e.expiry)} ({e.dte}d)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="date"
+                      value={leg.expiry}
+                      onChange={(e) => handleLegChange(index, 'expiry', e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1"
+                    />
+                  )}
                 </label>
                 <label className="text-xs uppercase text-slate-500">
                   Qty
@@ -254,6 +286,14 @@ export default function PaperTradingPage() {
                     </button>
                   )}
                 </div>
+                <p className="text-xs tabular-nums text-slate-400 sm:col-span-6">
+                  {(() => {
+                    const live = liveLeg(leg);
+                    if (!live) return quote ? 'No live quote for this strike/expiry; it will be entered at 0.' : 'Waiting for quotes...';
+                    const fmt = (v?: number | null) => (v ? v.toFixed(2) : '–');
+                    return `${live.identifier} · Bid ${fmt(live.bid)} · Ask ${fmt(live.ask)} · Mid ${fmt(legMid(live))} (fill price)`;
+                  })()}
+                </p>
               </div>
             ))}
           </div>

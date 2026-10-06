@@ -44,16 +44,29 @@ def test_occ_symbol():
     assert occ_symbol(date(2026, 10, 16), "P", 6702.5) == "SPXW261016P06702500"
 
 
-def test_quote_uses_nearest_expiry_at_least_a_day_out():
+def test_quote_has_every_live_expiry_and_a_default():
     s = state_with(rate_env(), chain_env(date(2026, 10, 5)), chain_env(date(2026, 10, 6)), chain_env(date(2026, 10, 9)))
     quote = s.to_quote(now=QUOTED + timedelta(minutes=1))
     assert date(2026, 10, 5) not in s.chains                       # settled at today's close: forgotten
-    assert {leg["expiry"] for leg in quote["legs"]} == {"2026-10-06"}
+    assert {leg["expiry"] for leg in quote["legs"]} == {"2026-10-06", "2026-10-09"}
+    assert quote["default_expiry"] == "2026-10-06"                 # nearest at least 1 day out
+    assert [(e["expiry"], e["dte"]) for e in quote["expiries"]] == [("2026-10-06", 1), ("2026-10-09", 4)]
+    for e in quote["expiries"]:                                     # each expiry priced on its own forward
+        assert e["atm_iv"] == pytest.approx(VOL, abs=0.003)
     assert (quote["source"], quote["delay_minutes"], quote["symbol"]) == ("cboe", 15, "SPX")
-    leg = next(l for l in quote["legs"] if l["strike"] == 6700 and l["option_type"] == "CALL")
+    leg = next(l for l in quote["legs"] if l["strike"] == 6700 and l["option_type"] == "CALL" and l["expiry"] == "2026-10-06")
     assert leg["identifier"] == "SPXW261006C06700000"
     assert leg["iv"] == pytest.approx(VOL, abs=0.003)               # recomputed from the mid
     assert quote["spot_iv"] == pytest.approx(VOL, abs=0.003)
+
+
+def test_legs_carry_delta_volume_and_open_interest():
+    quote = state_with(rate_env(), chain_env(date(2026, 10, 9))).to_quote(now=QUOTED)
+    calls = [l for l in quote["legs"] if l["option_type"] == "CALL"]
+    puts = [l for l in quote["legs"] if l["option_type"] == "PUT"]
+    assert all(0 <= l["delta"] <= 1 for l in calls) and all(-1 <= l["delta"] <= 0 for l in puts)
+    assert calls[0]["delta"] > calls[-1]["delta"]                    # lower strike call = higher delta
+    assert {"volume", "open_interest"} <= set(calls[0])
 
 
 def test_newer_messages_win_and_stale_ones_are_ignored():

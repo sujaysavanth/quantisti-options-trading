@@ -25,6 +25,7 @@ class StrategyInstance(BaseModel):
     breakevens: List[float] = []
     legs: List[StrategyLeg]
     # Copied from the market-stream quote the strategy was built from.
+    expiry: Optional[str] = None
     spot_price: Optional[float] = None
     source: Optional[str] = None
     delay_minutes: Optional[int] = None

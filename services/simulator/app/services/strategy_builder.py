@@ -6,17 +6,12 @@ from typing import Dict, List, Optional
 
 from .. import market_spec
 from ..models.strategy_live import StrategyInstance, StrategyLeg
+from .quote_pricing import leg_price, select_expiry
 
 # Distance between strategy strikes: 25 SPX points (~0.3%), five strikes on the 5-point grid.
 STEP = 5 * market_spec.STRIKE_STEP
 
-
-def _pick_price(leg: Dict) -> float:
-    for key in ("last", "bid", "ask"):
-        val = leg.get(key)
-        if val not in (None, 0):
-            return float(val)
-    return 0.0
+_pick_price = leg_price
 
 
 def _nearest_leg(legs: List[Dict], option_type: str, target: float, prefer: str = "closest") -> Optional[Dict]:
@@ -44,8 +39,10 @@ def _leg_model(raw: Dict, side: str, qty: int = 1) -> StrategyLeg:
     )
 
 
-def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
-    legs_raw = quote.get("legs") or []
+def build_strategies_from_quote(quote: Dict, expiry: Optional[str] = None) -> List[StrategyInstance]:
+    """Strategies on one expiry: `expiry` if given, else the quote's default. Empty if that expiry isn't quoted."""
+    chosen = select_expiry(quote, expiry)
+    legs_raw = [leg for leg in quote.get("legs") or [] if str(leg.get("expiry")) == chosen]
     if not legs_raw:
         return []
 
@@ -558,6 +555,7 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
             )
 
     context = {
+        "expiry": chosen,
         "spot_price": price,
         "source": quote.get("source"),
         "delay_minutes": quote.get("delay_minutes"),

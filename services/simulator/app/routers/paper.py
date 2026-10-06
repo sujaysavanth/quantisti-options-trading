@@ -11,6 +11,7 @@ from ..dependencies import get_market_stream_client, get_paper_store
 from ..models.paper import PaperLegInput, PaperLegState, PaperTradeCreate, PaperTradeResponse
 from ..services.market_stream_client import MarketStreamClient
 from ..services.paper_store import PaperTradeStore, StoredLeg, StoredTrade
+from ..services.quote_pricing import leg_price
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/paper", tags=["paper-trading"])
@@ -43,11 +44,8 @@ def _match_quote_leg(quote: dict, leg: PaperLegInput | StoredLeg):
 
 
 def _price_from_quote(q_leg: dict) -> float:
-    for key in ("last", "bid", "ask"):
-        value = q_leg.get(key)
-        if value not in (None, 0):
-            return float(value)
-    return 0.0
+    # Enter and mark at the bid/ask mid; the last trade is only a fallback.
+    return leg_price(q_leg)
 
 
 def build_response(trade: StoredTrade, quote: dict) -> PaperTradeResponse:
