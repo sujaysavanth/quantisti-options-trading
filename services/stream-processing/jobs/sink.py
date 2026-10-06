@@ -8,6 +8,8 @@ Functions take an open connection and don't commit; the caller commits once
 per micro-batch so a batch lands completely or not at all.
 """
 
+import csv
+import io
 from datetime import date, datetime, timezone
 from typing import Iterable, Optional, Sequence
 
@@ -23,6 +25,21 @@ UPSERT_CHAIN = """
         last = EXCLUDED.last, open_interest = EXCLUDED.open_interest, volume = EXCLUDED.volume,
         vendor_iv = EXCLUDED.vendor_iv, vendor_delta = EXCLUDED.vendor_delta, quoted_at = EXCLUDED.quoted_at
     -- newest quote wins; a replayed or late older capture never overwrites a newer one
+    WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at
+"""
+
+CHAIN_COLUMNS = ("symbol, snapshot_date, expiry_date, strike, option_type, underlying_price, bid, ask, last, "
+                 "open_interest, volume, vendor_iv, vendor_delta, quoted_at, source")
+
+# Bulk version of UPSERT_CHAIN for historical imports: COPY into a temp table (far faster than
+# INSERT ... VALUES for millions of rows), then one INSERT ... SELECT with the same conflict rule.
+COPY_UPSERT_CHAIN = f"""
+    INSERT INTO option_chain_snapshots ({CHAIN_COLUMNS})
+    SELECT {CHAIN_COLUMNS} FROM chain_stage
+    ON CONFLICT (symbol, snapshot_date, expiry_date, strike, option_type, source) DO UPDATE SET
+        underlying_price = EXCLUDED.underlying_price, bid = EXCLUDED.bid, ask = EXCLUDED.ask,
+        last = EXCLUDED.last, open_interest = EXCLUDED.open_interest, volume = EXCLUDED.volume,
+        vendor_iv = EXCLUDED.vendor_iv, vendor_delta = EXCLUDED.vendor_delta, quoted_at = EXCLUDED.quoted_at
     WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at
 """
 
@@ -90,6 +107,27 @@ def write_chain(conn, rows: Sequence[tuple]) -> int:
     with conn.cursor() as cur:
         execute_values(cur, UPSERT_CHAIN, rows, page_size=1000)
     return len(rows)
+
+
+def copy_chain(conn, rows: Iterable[tuple]) -> int:
+    """Bulk upsert of chain rows (UPSERT_CHAIN column order) through COPY and a temp staging table."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    count = 0
+    for r in rows:
+        r = list(r)
+        r[13] = utc(r[13]).isoformat() if r[13] is not None else None      # quoted_at
+        writer.writerow(["" if v is None else v for v in r])
+        count += 1
+    if not count:
+        return 0
+    buf.seek(0)
+    with conn.cursor() as cur:
+        cur.execute(f"CREATE TEMP TABLE chain_stage AS SELECT {CHAIN_COLUMNS} FROM option_chain_snapshots WITH NO DATA")
+        cur.copy_expert(f"COPY chain_stage ({CHAIN_COLUMNS}) FROM STDIN WITH (FORMAT csv, NULL '')", buf)
+        cur.execute(COPY_UPSERT_CHAIN)
+        cur.execute("DROP TABLE chain_stage")      # not ON COMMIT DROP: callers may run several per transaction
+    return count
 
 
 def write_bars(conn, rows: Sequence[tuple]) -> int:

@@ -1,4 +1,6 @@
-FROM apache/spark:3.5.3-python3
+# The Java 17 / Ubuntu 22.04 variant ships Python 3.10 (the plain python3 tag has 3.8, which lacks
+# zoneinfo), so the shared market_spec.py calendar runs here unchanged.
+FROM apache/spark:3.5.3-scala2.12-java17-python3-ubuntu
 
 USER root
 
@@ -15,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && ln -sf /usr/bin/python3 /usr/local/bin/python \
     && mkdir -p /checkpoints && chown spark:spark /checkpoints
 
+COPY log4j2.properties /opt/spark/conf/log4j2.properties
 COPY pytest.ini ./
 COPY jobs ./jobs
 COPY tests ./tests

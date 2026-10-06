@@ -7,7 +7,7 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 
-from jobs.sink import write_bars, write_chain, write_daily  # noqa: E402
+from jobs.sink import copy_chain, write_bars, write_chain, write_daily  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://quantisti:quantisti@postgres:5432/quantisti")
 DAY = date(2099, 1, 5)          # far from real data, and rolled back anyway
@@ -96,3 +96,13 @@ def test_bars_upsert_and_partial_window_overwrite(conn):
                     "WHERE symbol = 'SPX' AND ts >= %s AND ts < %s GROUP BY interval ORDER BY interval",
                     (ts.replace(tzinfo=timezone.utc), (ts + timedelta(hours=1)).replace(tzinfo=timezone.utc)))
         assert cur.fetchall() == [("1m", 3, 10, "yahoo"), ("5m", 1, 50, "agg_1m")]
+
+
+def test_copy_chain_matches_the_row_upsert(conn):
+    rows = [chain_row(40.5), chain_row(30.0, strike=7780.0)]
+    assert copy_chain(conn, rows) == 2
+    assert copy_chain(conn, rows) == 2                                    # re-import: same rows, no duplicates
+    assert [(float(s), float(b)) for s, b, _ in snapshot(conn)] == [(7775.0, 40.5), (7780.0, 30.0)]
+    copy_chain(conn, [chain_row(10.0, quoted_at=QUOTED - timedelta(days=1))])   # older capture: ignored
+    assert float(snapshot(conn)[0][1]) == 40.5
+    assert copy_chain(conn, []) == 0

@@ -122,6 +122,22 @@ services:
     mem_limit: 2g
     restart: unless-stopped
 
+  # One-off Spark batch jobs (same image), e.g. the OptionsDX import. Not started by `up`:
+  #   docker compose -f docker-compose.yml -f docker-compose.streaming.yml run --rm spark-import
+  spark-import:
+    build: ./services/stream-processing
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti
+    volumes:
+      - ./data:/data:ro               # OptionsDX files in data/optionsdx/spx (git-ignored)
+    mem_limit: 6g
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[4]", "--driver-memory", "4g",
+              "--conf", "spark.sql.session.timeZone=UTC", "jobs/import_optionsdx.py", "--input", "/data/optionsdx/spx"]
+
 volumes:
   kafka_data:
   spark_checkpoints:
