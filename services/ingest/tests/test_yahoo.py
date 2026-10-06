@@ -23,6 +23,13 @@ def test_regular_session_only_and_utc():
     assert bars[0].symbol == "VIX" and bars[0].interval == "1m" and bars[0].close == 16.1
 
 
+def test_hourly_bar_overlapping_the_open_is_kept():
+    # VIX hourly bars are on the hour: the 09:00 ET bar covers 09:30-10:00 of the session.
+    df = frame(["2026-10-05 08:00", "2026-10-05 09:00", "2026-10-05 15:00", "2026-10-05 16:00"], "America/New_York")
+    bars = fetch_bars("VIX", "1h", NOW - timedelta(days=1), NOW, download=lambda **kw: df, now=NOW)
+    assert [b.ts.astimezone(timezone.utc).hour for b in bars] == [13, 19]     # 09:00 and 15:00 ET; 08:00 and 16:00 out
+
+
 def test_one_minute_requests_are_split_into_week_chunks():
     calls = []
     fetch_bars("SPX", "1m", NOW - timedelta(days=20), NOW,

@@ -142,3 +142,6 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Downloaded market data (OptionsDX files etc.): large and licensed, never commit
+/data/

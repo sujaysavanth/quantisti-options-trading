@@ -8,6 +8,8 @@ or run the Kafka producers once.
     python -m app.cli fetch-rates --days 7
     python -m app.cli poll-once --all --force                          # inside the ingest container
     python -m app.cli poll-once --daily --bootstrap localhost:9094     # from your machine
+    python -m app.cli backfill-intraday --max                          # all the intraday history Yahoo still has
+    python -m app.cli backfill-intraday --days 5 --interval 1m --symbol SPX
 """
 
 from __future__ import annotations
@@ -84,6 +86,23 @@ def poll_once(args) -> None:
     print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
 
 
+def backfill_intraday(args) -> None:
+    from .backfill.intraday import backfill, plan_ranges
+    from .producers.kafka import Publisher
+
+    publisher = Publisher(args.bootstrap)
+    if error := publisher.ping():
+        raise SystemExit(f"Kafka at {args.bootstrap} is not reachable: {error}")
+    ranges = plan_ranges(datetime.now(timezone.utc), intervals=args.interval.split(","),
+                         symbols=args.symbol.split(","), days=None if args.max else args.days)
+    for res in backfill(publisher, ranges):
+        r = res.range
+        outcome = f"FAILED {res.error}" if res.error else f"{res.bars:,} bars"
+        print(f"{r.symbol} {r.interval:>2} {r.start:%Y-%m-%d} .. {r.end:%Y-%m-%d}: {outcome}")
+    left = publisher.flush(60)
+    print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
+
+
 def main(argv=None) -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Fetch market data and print it")
@@ -114,6 +133,15 @@ def main(argv=None) -> None:
     p.add_argument("--force", action="store_true", help="run intraday/chain even when the market is closed")
     p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
     p.set_defaults(run=poll_once)
+
+    p = sub.add_parser("backfill-intraday", help="publish historical 1m/5m/1h bars from Yahoo to Kafka")
+    window = p.add_mutually_exclusive_group(required=True)
+    window.add_argument("--max", action="store_true", help="as far back as Yahoo serves each interval")
+    window.add_argument("--days", type=float, help="only the last N days (capped at Yahoo's window)")
+    p.add_argument("--interval", default="1h,5m,1m", help="comma-separated: 1m,5m,1h")
+    p.add_argument("--symbol", default="SPX,VIX", help="comma-separated: SPX,VIX")
+    p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
+    p.set_defaults(run=backfill_intraday)
 
     args = parser.parse_args(argv)
     if args.command == "poll-once" and not (args.intraday or args.chain or args.daily or args.all):

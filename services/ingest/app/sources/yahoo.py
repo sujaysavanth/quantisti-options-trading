@@ -41,18 +41,26 @@ def _cents(value: Any) -> float:
     return round(float(value), 2)
 
 
+BAR_LENGTH = {"1m": timedelta(minutes=1), "5m": timedelta(minutes=5), "1h": timedelta(hours=1)}
+
+
 def to_bars(df: pd.DataFrame, symbol: str, interval: str) -> List[Bar]:
-    """Yahoo DataFrame -> regular-session bars in UTC. VIX also trades overnight; those bars are dropped."""
+    """Yahoo DataFrame -> bars that overlap the regular session, in UTC. VIX also trades overnight; those bars are dropped.
+
+    "Overlap", not "start inside": Yahoo aligns VIX hourly bars on the hour, so its 09:00-10:00 bar
+    covers the first half hour of the session and is kept (ts stays 09:00, as Yahoo labels it).
+    """
     if df.empty:
         return []
     if isinstance(df.columns, pd.MultiIndex):
         df = df.droplevel(1, axis=1)
+    length = BAR_LENGTH.get(interval, timedelta(0))
     bars = []
     for ts, row in df.dropna(subset=["Open", "High", "Low", "Close"]).iterrows():
         start = ts.to_pydatetime().astimezone(timezone.utc)
         day = start.astimezone(market_spec.TZ).date()
         opens = datetime.combine(day, datetime.strptime("09:30", "%H:%M").time(), market_spec.TZ)
-        if not market_spec.is_trading_day(day) or not (opens <= start < market_spec.session_close(day)):
+        if not market_spec.is_trading_day(day) or not (start + length > opens and start < market_spec.session_close(day)):
             continue
         bars.append(Bar(symbol, interval, start, _cents(row["Open"]), _cents(row["High"]), _cents(row["Low"]),
                         _cents(row["Close"]), int(row["Volume"]) if pd.notna(row["Volume"]) else 0))

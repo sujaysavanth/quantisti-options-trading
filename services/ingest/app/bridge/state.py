@@ -53,7 +53,8 @@ class BridgeState:
         """Take in one message; True if it changed what we would publish."""
         p = env.payload
         if isinstance(p, BarPayload):
-            if p.symbol == "SPX" and (self.spot is None or p.ts > self.spot.ts):
+            # Only 1m bars: a 5m/1h bar (from a backfill) starts earlier than the minute it ends on.
+            if p.symbol == "SPX" and p.interval == "1m" and (self.spot is None or p.ts > self.spot.ts):
                 self.spot = p
                 return True
         elif isinstance(p, ChainPayload):

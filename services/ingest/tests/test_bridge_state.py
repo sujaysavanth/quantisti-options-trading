@@ -84,5 +84,12 @@ def test_last_price_prefers_the_newer_of_bar_and_chain():
     assert older_bar.to_quote(now=QUOTED + timedelta(minutes=2))["last_price"] == SPOT
 
 
+def test_only_one_minute_bars_set_the_price():
+    s = state_with(bar_env(QUOTED, close=6705.0))
+    hourly = wrap("bars.v1", "yahoo", 0, BarPayload(symbol="SPX", interval="1h", ts=QUOTED + timedelta(hours=1),
+                                                    open=1.0, high=1.0, low=1.0, close=1.0, volume=0))
+    assert not s.apply(hourly) and s.spot.close == 6705.0
+
+
 def test_no_chain_no_quote():
     assert state_with(bar_env(QUOTED)).to_quote(now=QUOTED) is None

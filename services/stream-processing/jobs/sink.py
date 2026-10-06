@@ -31,6 +31,9 @@ UPSERT_BARS = """
     ON CONFLICT (symbol, interval, ts) DO UPDATE SET
         open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
         volume = EXCLUDED.volume, source = EXCLUDED.source, ingested_at = now()
+    -- A vendor's own bar is always a complete interval; our 'agg_1m' 5m bars can miss a minute.
+    -- So vendor bars replace anything, while an aggregate only replaces an earlier aggregate.
+    WHERE EXCLUDED.source <> 'agg_1m' OR intraday_bars.source = 'agg_1m'
 """
 
 UPSERT_UNDERLYING = """

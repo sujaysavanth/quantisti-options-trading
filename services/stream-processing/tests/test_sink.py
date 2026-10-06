@@ -68,6 +68,22 @@ def test_daily_upserts_and_recomputes_hv(conn):
         assert float(cur.fetchone()[0]) == 0.0412
 
 
+def five_minute(conn, ts):
+    with conn.cursor() as cur:
+        cur.execute("SELECT volume, source FROM intraday_bars WHERE symbol = 'SPX' AND interval = '5m' AND ts = %s",
+                    (ts.replace(tzinfo=timezone.utc),))
+        return cur.fetchone()
+
+
+def test_vendor_bar_beats_our_aggregate(conn):
+    ts = datetime(2099, 1, 6, 14, 30)
+    write_bars(conn, [("SPX", "5m", ts, 100.0, 101.0, 99.0, 100.5, 40, "agg_1m")])     # missed a minute
+    write_bars(conn, [("SPX", "5m", ts, 100.0, 101.0, 99.0, 100.5, 50, "yahoo")])      # backfill: vendor wins
+    assert five_minute(conn, ts) == (50, "yahoo")
+    write_bars(conn, [("SPX", "5m", ts, 100.0, 101.0, 99.0, 100.5, 45, "agg_1m")])     # aggregate can't undo it
+    assert five_minute(conn, ts) == (50, "yahoo")
+
+
 def test_bars_upsert_and_partial_window_overwrite(conn):
     ts = datetime(2099, 1, 5, 14, 30)
     one_minute = [("SPX", "1m", ts + timedelta(minutes=m), 100.0, 101.0, 99.0, 100.5, 10, "yahoo") for m in range(3)]
