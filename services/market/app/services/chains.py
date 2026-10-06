@@ -154,6 +154,20 @@ class Quote:
         return None
 
 
+# Best first: CBOE (live collection, has open interest), OptionsDX (historical end-of-day files),
+# then Yahoo (no reliable OI). Anything else ranks after these, alphabetically.
+SNAPSHOT_SOURCE_PRIORITY = ("cboe", "optionsdx", "yahoo")
+
+
+def preferred_snapshot_source(sources: Iterable[str]) -> Optional[str]:
+    """The one source to read a day's snapshot from when several captured it."""
+    available = sorted(set(sources))
+    if not available:
+        return None
+    rank = {name: i for i, name in enumerate(SNAPSHOT_SOURCE_PRIORITY)}
+    return min(available, key=lambda s: (rank.get(s, len(rank)), s))
+
+
 def infer_forward(quotes: Iterable[Quote], T: float, rate: float, spot_hint: float, n: int = 5) -> Optional[float]:
     """Forward price from put-call parity, F = K + e^{rT} (C - P), using the n strikes nearest spot_hint."""
     by_strike: Dict[float, Dict[str, float]] = {}

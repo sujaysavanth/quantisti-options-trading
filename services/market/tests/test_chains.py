@@ -90,3 +90,17 @@ def test_snapshot_chain_ignores_stale_spot_and_recovers_vol():
 def test_snapshot_chain_needs_two_sided_quotes():
     quotes = [Quote(7650, "C", bid=0, ask=1.0, last=None, open_interest=0, volume=0)]
     assert build_snapshot_chain(quotes, 7650, date(2026, 9, 30), date(2026, 10, 2), 2 / 365, RATE, 5) is None
+
+
+# ---------------------------------------------------------------- snapshot source choice
+
+from app.services.chains import preferred_snapshot_source  # noqa: E402
+
+
+def test_one_snapshot_source_per_day():
+    assert preferred_snapshot_source(["yahoo", "cboe"]) == "cboe"
+    assert preferred_snapshot_source(["yahoo", "optionsdx"]) == "optionsdx"
+    assert preferred_snapshot_source(["yahoo"]) == "yahoo"
+    assert preferred_snapshot_source(["zeta", "alpha"]) == "alpha"         # unknown sources: alphabetical
+    assert preferred_snapshot_source(["alpha", "yahoo"]) == "yahoo"        # known sources rank first
+    assert preferred_snapshot_source([]) is None

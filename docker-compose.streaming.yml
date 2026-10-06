@@ -101,5 +101,27 @@ services:
       BRIDGE_MIN_DTE: "1"
     restart: unless-stopped
 
+  # Spark Structured Streaming: market.daily and options.chain.quotes -> Postgres (services/stream-processing).
+  spark:
+    build: ./services/stream-processing
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti
+      TRIGGER_INTERVAL: 30 seconds
+    ports:
+      - "4040:4040"   # Spark UI -> Structured Streaming tab
+    volumes:
+      - spark_checkpoints:/checkpoints   # the offsets each query has written; delete to reprocess from scratch
+    mem_limit: 2g
+    restart: unless-stopped
+
 volumes:
   kafka_data:
+  spark_checkpoints:

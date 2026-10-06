@@ -11,7 +11,7 @@ from .. import market_spec
 from ..config import get_settings
 from ..db.connection import get_db_connection, return_db_connection
 from ..models.market_data import CandleData
-from .chains import Quote, build_snapshot_chain, build_synthetic_chain
+from .chains import Quote, build_snapshot_chain, build_synthetic_chain, preferred_snapshot_source
 
 logger = logging.getLogger(__name__)
 
@@ -133,14 +133,25 @@ class DataProvider:
             return [{"date": r["date"], "close": float(r["close"])} for r in cur.fetchall()]
 
     def get_snapshot_quotes(self, on: date, expiry: date) -> List[Dict[str, Any]]:
+        """Quotes from one source only: mixing CBOE and Yahoo rows would list every strike twice."""
         with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT source FROM option_chain_snapshots
+                WHERE symbol = %s AND snapshot_date = %s AND expiry_date = %s
+                """,
+                (self.symbol, on, expiry),
+            )
+            source = preferred_snapshot_source(r["source"] for r in cur.fetchall())
+            if source is None:
+                return []
             cur.execute(
                 """
                 SELECT strike, option_type, bid, ask, last, open_interest, volume, underlying_price
                 FROM option_chain_snapshots
-                WHERE symbol = %s AND snapshot_date = %s AND expiry_date = %s
+                WHERE symbol = %s AND snapshot_date = %s AND expiry_date = %s AND source = %s
                 """,
-                (self.symbol, on, expiry),
+                (self.symbol, on, expiry, source),
             )
             return cur.fetchall()
 
