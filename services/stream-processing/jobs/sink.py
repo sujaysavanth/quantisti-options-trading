@@ -26,6 +26,13 @@ UPSERT_CHAIN = """
     WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at
 """
 
+UPSERT_BARS = """
+    INSERT INTO intraday_bars (symbol, interval, ts, open, high, low, close, volume, source) VALUES %s
+    ON CONFLICT (symbol, interval, ts) DO UPDATE SET
+        open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
+        volume = EXCLUDED.volume, source = EXCLUDED.source, ingested_at = now()
+"""
+
 UPSERT_UNDERLYING = """
     INSERT INTO underlying_daily (symbol, date, open, high, low, close, volume) VALUES %s
     ON CONFLICT (symbol, date) DO UPDATE SET
@@ -79,6 +86,17 @@ def write_chain(conn, rows: Sequence[tuple]) -> int:
     rows = [r[:13] + (utc(r[13]),) + r[14:] for r in rows]
     with conn.cursor() as cur:
         execute_values(cur, UPSERT_CHAIN, rows, page_size=1000)
+    return len(rows)
+
+
+def write_bars(conn, rows: Sequence[tuple]) -> int:
+    """Rows: (symbol, interval, ts, open, high, low, close, volume, source). A later write of the
+    same bar replaces it, which is what lets a growing 5m window overwrite its earlier partial self."""
+    if not rows:
+        return 0
+    rows = [r[:2] + (utc(r[2]),) + r[3:] for r in rows]
+    with conn.cursor() as cur:
+        execute_values(cur, UPSERT_BARS, rows, page_size=1000)
     return len(rows)
 
 

@@ -7,7 +7,7 @@ import pytest
 
 psycopg2 = pytest.importorskip("psycopg2")
 
-from jobs.sink import write_chain, write_daily  # noqa: E402
+from jobs.sink import write_bars, write_chain, write_daily  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://quantisti:quantisti@postgres:5432/quantisti")
 DAY = date(2099, 1, 5)          # far from real data, and rolled back anyway
@@ -66,3 +66,17 @@ def test_daily_upserts_and_recomputes_hv(conn):
         assert float(cur.fetchone()[0]) == 16.4
         cur.execute("SELECT rate FROM rates_daily WHERE date = %s", (DAY,))
         assert float(cur.fetchone()[0]) == 0.0412
+
+
+def test_bars_upsert_and_partial_window_overwrite(conn):
+    ts = datetime(2099, 1, 5, 14, 30)
+    one_minute = [("SPX", "1m", ts + timedelta(minutes=m), 100.0, 101.0, 99.0, 100.5, 10, "yahoo") for m in range(3)]
+    write_bars(conn, one_minute)
+    write_bars(conn, one_minute)                                          # replay: no change
+    write_bars(conn, [("SPX", "5m", ts, 100.0, 101.0, 99.0, 100.5, 30, "agg_1m")])     # window so far
+    write_bars(conn, [("SPX", "5m", ts, 100.0, 102.0, 98.0, 101.0, 50, "agg_1m")])     # same window, complete
+    with conn.cursor() as cur:
+        cur.execute("SELECT interval, count(*), max(volume), min(source) FROM intraday_bars "
+                    "WHERE symbol = 'SPX' AND ts >= %s AND ts < %s GROUP BY interval ORDER BY interval",
+                    (ts.replace(tzinfo=timezone.utc), (ts + timedelta(hours=1)).replace(tzinfo=timezone.utc)))
+        assert cur.fetchall() == [("1m", 3, 10, "yahoo"), ("5m", 1, 50, "agg_1m")]

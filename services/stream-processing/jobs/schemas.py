@@ -33,6 +33,13 @@ DAILY_PAYLOAD = _fields(
 )
 
 
+BAR_PAYLOAD = _fields(
+    ("symbol", StringType()), ("interval", StringType()), ("ts", TimestampType()),
+    ("open", DoubleType()), ("high", DoubleType()), ("low", DoubleType()), ("close", DoubleType()),
+    ("volume", LongType()),
+)
+
+
 def envelope(payload: StructType) -> StructType:
     return _fields(
         ("schema", StringType()), ("source", StringType()), ("delay_minutes", IntegerType()),
