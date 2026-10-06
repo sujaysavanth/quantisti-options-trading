@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     CHAIN_EXPIRIES: int = 5
     CHAIN_MONEYNESS: float = 0.05
 
+    # Stream bridge (python -m app.bridge): where to post quotes, and which expiry to show:
+    # the nearest one at least this many calendar days out.
+    MARKET_STREAM_URL: str = "http://market_stream:8090"
+    BRIDGE_MIN_DTE: int = 1
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -20,7 +20,7 @@ async def get_live_strategies(
 ):
     quote = await stream_client.get_quote(symbol)
     if not quote:
-        raise HTTPException(status_code=404, detail=f"No live quote for {symbol}. Start collectors.")
+        raise HTTPException(status_code=404, detail=f"No live quote for {symbol}. Start the ingest and stream-bridge services.")
 
     strategies = build_strategies_from_quote(quote)
     return strategies

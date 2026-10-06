@@ -557,4 +557,10 @@ def build_strategies_from_quote(quote: Dict) -> List[StrategyInstance]:
                 )
             )
 
-    return strategies
+    context = {
+        "spot_price": price,
+        "source": quote.get("source"),
+        "delay_minutes": quote.get("delay_minutes"),
+        "quoted_at": quote.get("quoted_at"),
+    }
+    return [StrategyInstance.model_validate({**s.model_dump(), **context}) for s in strategies]

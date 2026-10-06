@@ -234,6 +234,31 @@ const generateSummaryFromQuote = (quote: MarketQuoteSnapshot, fallbackExpiry: st
   };
 };
 
+// Where the live quotes come from, taken from the simulator's /v1/strategies-live response.
+type FeedInfo = {
+  source?: string;
+  delayMinutes?: number;
+  quotedAt?: string;
+  spot?: number;
+};
+
+const SOURCE_LABELS: Record<string, string> = { cboe: 'CBOE', yahoo: 'Yahoo' };
+
+const feedLabel = (feed: FeedInfo) => {
+  const parts: string[] = [];
+  if (feed.delayMinutes) parts.push(`Delayed ${feed.delayMinutes} min`);
+  else if (feed.delayMinutes === 0) parts.push('Real-time');
+  if (feed.source) parts.push(SOURCE_LABELS[feed.source] ?? feed.source);
+  if (feed.quotedAt) {
+    const at = new Date(feed.quotedAt);
+    const opts: Intl.DateTimeFormatOptions = { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false };
+    const sameDay = at.toDateString() === new Date().toDateString();
+    if (!sameDay) Object.assign(opts, { month: 'short', day: 'numeric' });
+    parts.push(`as of ${at.toLocaleString('en-US', opts)} ET`);
+  }
+  return parts.join(' · ');
+};
+
 interface PaperTrade {
   id: string;
   symbol: string;
@@ -263,6 +288,8 @@ export default function Page() {
   const [isSending, setIsSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [feed, setFeed] = useState<FeedInfo | null>(null);
+  const [feedStatus, setFeedStatus] = useState<'loading' | 'live' | 'waiting'>('loading');
   const [summary, setSummary] = useState({
     weekOf: dashboardMock.weekOf,
     expiry: dashboardMock.expiry,
@@ -319,9 +346,18 @@ export default function Page() {
         if (!response.ok) {
           setStrategies([]);
           setSelected(null);
+          setFeed(null);
+          setFeedStatus('waiting');
           return;
         }
         const liveStrategies = (await response.json()) as any[];
+        const first = liveStrategies[0];
+        setFeed(
+          first
+            ? { source: first.source, delayMinutes: first.delay_minutes, quotedAt: first.quoted_at, spot: first.spot_price }
+            : null
+        );
+        setFeedStatus(liveStrategies.length ? 'live' : 'waiting');
         const mapped: StrategyRecommendation[] = liveStrategies.map((s) => {
           const legs: OptionLeg[] = (s.legs ?? []).map((leg: any) => {
             const premium = leg.price ?? 0;
@@ -398,6 +434,8 @@ export default function Page() {
         console.error('Failed to load live strategies from simulator', err);
         setStrategies([]);
         setSelected(null);
+        setFeed(null);
+        setFeedStatus('waiting');
       }
     };
     loadStrategies();
@@ -487,7 +525,19 @@ export default function Page() {
               Insights generated from ML forecasts of price, volatility, and Greeks for the upcoming expiry.
             </p>
           </div>
-          <ThemeToggle />
+          <div className="flex items-center gap-3">
+            {feedStatus === 'live' && feed && (
+              <span
+                className="inline-flex items-center gap-2 rounded-full border border-amber-300/60 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+                title="Free data source: option quotes lag the market"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+                {feed.spot ? `SPX ${feed.spot.toLocaleString('en-US', { maximumFractionDigits: 2 })} · ` : ''}
+                {feedLabel(feed)}
+              </span>
+            )}
+            <ThemeToggle />
+          </div>
         </header>
 
         <StrategySummary
@@ -497,12 +547,25 @@ export default function Page() {
           closingPriceEstimate={summary.closingPriceEstimate}
           context={summary.context}
         />
-        <PayoffChart strategy={selected} leg={selectedLeg} />
-        <OptionBreakdown
-          strategy={selected}
-          selectedLeg={selectedLeg}
-          onSelectLeg={handleLegSelect}
-        />
+        {feedStatus === 'waiting' ? (
+          <section className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 p-10 text-center">
+            <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Live strategies</p>
+            <h3 className="mt-2 text-2xl font-semibold">Waiting for market data</h3>
+            <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500 dark:text-slate-400">
+              No SPX quote has reached the market-stream service yet. Start the <code>ingest</code> and{' '}
+              <code>stream-bridge</code> services; this page checks again every 30 seconds.
+            </p>
+          </section>
+        ) : (
+          <>
+            <PayoffChart strategy={selected} leg={selectedLeg} />
+            <OptionBreakdown
+              strategy={selected}
+              selectedLeg={selectedLeg}
+              onSelectLeg={handleLegSelect}
+            />
+          </>
+        )}
         <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>

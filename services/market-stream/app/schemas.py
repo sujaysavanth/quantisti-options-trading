@@ -24,6 +24,10 @@ class QuoteUpsert(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     spot_iv: Optional[float] = Field(default=None, description="Implied volatility at ATM")
     legs: List[OptionLegQuote] = Field(default_factory=list)
+    # Where the quotes come from and how stale they are, so the UI can label them honestly.
+    source: Optional[str] = Field(default=None, description="Data source, e.g. cboe")
+    delay_minutes: Optional[int] = Field(default=None, ge=0, description="Delay of the source's quotes")
+    quoted_at: Optional[datetime] = Field(default=None, description="Time the option quotes are from")
 
 
 class QuoteSnapshot(QuoteUpsert):

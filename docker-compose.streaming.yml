@@ -83,5 +83,23 @@ services:
       retries: 3
       start_period: 20s
 
+  # Kafka -> market-stream: keeps the latest SPX quote and chain and posts it for the dashboard.
+  # Same image as ingest, different entry point.
+  stream-bridge:
+    build: ./services/ingest
+    command: ["python", "-m", "app.bridge"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      market_stream:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      MARKET_STREAM_URL: http://market_stream:8090
+      BRIDGE_MIN_DTE: "1"
+    restart: unless-stopped
+
 volumes:
   kafka_data:
