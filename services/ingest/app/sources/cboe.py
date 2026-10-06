@@ -52,7 +52,8 @@ def parse_chain(payload: Dict[str, Any], expiries: int, moneyness: float) -> Cha
             expiry=s.expiry, option_type=s.option_type, strike=s.strike,
             bid=_price(o.get("bid")), ask=_price(o.get("ask")), last=_price(o.get("last_trade_price")),
             volume=_int(o.get("volume")), open_interest=_int(o.get("open_interest")),
-            vendor_iv=o.get("iv"), vendor_delta=o.get("delta"),
+            vendor_iv=o.get("iv") or None,   # CBOE sends iv 0 when it couldn't compute one
+            vendor_delta=o.get("delta"),
         )
         for s, o in usable
         if s.expiry in keep_expiries and lo <= s.strike <= hi

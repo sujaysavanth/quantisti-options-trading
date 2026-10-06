@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, List, Optional
 
 import pandas as pd
@@ -36,6 +36,11 @@ class Bar:
     source: str = "yahoo"
 
 
+def _cents(value: Any) -> float:
+    """Yahoo returns float32 prices (7730.85986328125); index levels are quoted to the cent."""
+    return round(float(value), 2)
+
+
 def to_bars(df: pd.DataFrame, symbol: str, interval: str) -> List[Bar]:
     """Yahoo DataFrame -> regular-session bars in UTC. VIX also trades overnight; those bars are dropped."""
     if df.empty:
@@ -49,8 +54,8 @@ def to_bars(df: pd.DataFrame, symbol: str, interval: str) -> List[Bar]:
         opens = datetime.combine(day, datetime.strptime("09:30", "%H:%M").time(), market_spec.TZ)
         if not market_spec.is_trading_day(day) or not (opens <= start < market_spec.session_close(day)):
             continue
-        bars.append(Bar(symbol, interval, start, float(row["Open"]), float(row["High"]), float(row["Low"]),
-                        float(row["Close"]), int(row["Volume"]) if pd.notna(row["Volume"]) else 0))
+        bars.append(Bar(symbol, interval, start, _cents(row["Open"]), _cents(row["High"]), _cents(row["Low"]),
+                        _cents(row["Close"]), int(row["Volume"]) if pd.notna(row["Volume"]) else 0))
     return bars
 
 
@@ -74,6 +79,36 @@ def fetch_bars(symbol: str, interval: str, start: datetime, end: datetime,
         bars += to_bars(df, symbol, interval)
         chunk_start = chunk_end
     return sorted({b.ts: b for b in bars}.values(), key=lambda b: b.ts)  # dedupe chunk overlaps
+
+
+# ---------------------------------------------------------------- daily bars
+
+@dataclass(frozen=True)
+class DailyBar:
+    date: date
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+
+
+def fetch_daily(symbol: str, start: date, end: date,
+                download: Optional[Callable[..., pd.DataFrame]] = None) -> List[DailyBar]:
+    """Daily OHLCV for trading days in [start, end]. Today's row is partial until the close."""
+    import yfinance as yf
+    download = download or (lambda **kw: yf.download(progress=False, auto_adjust=False, **kw))
+    df = download(tickers=TICKERS[symbol], start=start, end=end + timedelta(days=1), interval="1d")
+    if df.empty:
+        return []
+    if isinstance(df.columns, pd.MultiIndex):
+        df = df.droplevel(1, axis=1)
+    return [
+        DailyBar(ts.date(), _cents(r["Open"]), _cents(r["High"]), _cents(r["Low"]), _cents(r["Close"]),
+                 int(r["Volume"]) if pd.notna(r["Volume"]) else 0)
+        for ts, r in df.dropna(subset=["Open", "High", "Low", "Close"]).iterrows()
+        if start <= ts.date() <= end
+    ]
 
 
 # ---------------------------------------------------------------- fallback option chain

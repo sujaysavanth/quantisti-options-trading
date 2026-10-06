@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Containers reach Kafka at kafka:9092; tools on your machine use localhost:9094.
     KAFKA_BOOTSTRAP: str = "kafka:9092"
 
+    # Start the polling loop with the web app. Turn off to run only the API or the CLI.
+    PRODUCERS_ENABLED: bool = True
+
     # Where option chains come from. Both are free and ~15 minutes delayed;
     # only CBOE includes open interest.
     CHAIN_SOURCE: Literal["cboe", "yahoo"] = "cboe"

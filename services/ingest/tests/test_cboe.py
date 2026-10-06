@@ -17,7 +17,7 @@ PAYLOAD = {
             opt("SPXW261001C07700000"),                   # expired yesterday: dropped
             opt("SPXW261002C07700000"),                   # today's 0DTE
             opt("SPXW261002P07700000", bid=0),            # zero bid -> None
-            opt("SPXW261005C07700000"),
+            opt("SPXW261005C07700000", iv=0),             # CBOE's "no IV" -> None
             opt("SPXW261005C09000000"),                   # far outside +/-5%: dropped
             opt("SPX261016C07700000", oi=999),            # AM monthly duplicate: dropped
             opt("SPXW261016C07700000", oi=111),           # PM weekly at the same strike: kept
@@ -46,6 +46,7 @@ def test_fetch_chain_from_saved_payload():
     assert zero_bid.bid is None and zero_bid.ask == 10.5
     assert snap.quotes[3].open_interest == 111  # the SPXW row, not the SPX one
     assert snap.quotes[0].vendor_iv == 0.12
+    assert snap.quotes[2].vendor_iv is None
 
 
 VIX_CSV = """DATE,OPEN,HIGH,LOW,CLOSE

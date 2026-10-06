@@ -1,10 +1,13 @@
-"""Run any data source from the terminal and print what it returns (no Kafka, no database).
+"""Run any data source from the terminal and print what it returns (no Kafka, no database),
+or run the Kafka producers once.
 
     python -m app.cli fetch-chain --expiries 1 --limit 6
     python -m app.cli fetch-chain --source yahoo --expiries 1 --limit 6
     python -m app.cli fetch-bars --symbol SPX --interval 1m --days 1 --limit 5
     python -m app.cli fetch-vix --days 7
     python -m app.cli fetch-rates --days 7
+    python -m app.cli poll-once --all --force                          # inside the ingest container
+    python -m app.cli poll-once --daily --bootstrap localhost:9094     # from your machine
 """
 
 from __future__ import annotations
@@ -52,6 +55,35 @@ def fetch_rates(args) -> None:
         print(f"{row.date}  3m T-bill {row.rate:.4%}")
 
 
+def poll_once(args) -> None:
+    from .producers.chain import ChainPoller
+    from .producers.daily import DailyPoller
+    from .producers.intraday import IntradayPoller
+    from .producers.kafka import Publisher
+    from .producers.schedule import is_market_open
+
+    settings = get_settings()
+    publisher = Publisher(args.bootstrap)
+    if error := publisher.ping():
+        raise SystemExit(f"Kafka at {args.bootstrap} is not reachable: {error}")
+    market_open = is_market_open(datetime.now(timezone.utc))
+    todo = {
+        "intraday": (args.intraday or args.all, lambda: IntradayPoller(publisher).poll_once(), True),
+        "chain": (args.chain or args.all, lambda: ChainPoller(publisher, chain_source(settings.CHAIN_SOURCE),
+                  settings.CHAIN_EXPIRIES, settings.CHAIN_MONEYNESS).poll_once(force=True), True),
+        "daily": (args.daily or args.all, lambda: DailyPoller(publisher).poll_once(), False),
+    }
+    for name, (wanted, run, needs_open_market) in todo.items():
+        if not wanted:
+            continue
+        if needs_open_market and not market_open and not args.force:
+            print(f"{name}: market closed, skipped (add --force to run anyway)")
+            continue
+        print(f"{name}: {run()} messages queued")
+    left = publisher.flush(30)
+    print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
+
+
 def main(argv=None) -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Fetch market data and print it")
@@ -76,7 +108,16 @@ def main(argv=None) -> None:
         p.add_argument("--days", type=int, default=7)
         p.set_defaults(run=run)
 
+    p = sub.add_parser("poll-once", help="run pollers once and publish to Kafka")
+    for name in ("intraday", "chain", "daily", "all"):
+        p.add_argument(f"--{name}", action="store_true")
+    p.add_argument("--force", action="store_true", help="run intraday/chain even when the market is closed")
+    p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
+    p.set_defaults(run=poll_once)
+
     args = parser.parse_args(argv)
+    if args.command == "poll-once" and not (args.intraday or args.chain or args.daily or args.all):
+        parser.error("poll-once needs --intraday, --chain, --daily or --all")
     args.run(args)
 
 
