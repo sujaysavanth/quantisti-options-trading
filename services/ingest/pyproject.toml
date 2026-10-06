@@ -1,0 +1,26 @@
+[project]
+name = "ingest"
+version = "0.1.0"
+description = "Fetches SPX/VIX market data and option chains and publishes them to Kafka"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "httpx>=0.25.0",
+    "pandas>=2.1.0",
+    "yfinance>=0.2.40",
+    "exchange_calendars>=4.5",
+    "confluent-kafka>=2.3.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["app"]
