@@ -145,3 +145,6 @@ venv/
 
 # Downloaded market data (OptionsDX files etc.): large and licensed, never commit
 /data/
+
+# Claude Code settings for this checkout (personal permissions, not shared)
+.claude/

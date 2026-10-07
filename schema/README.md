@@ -7,10 +7,10 @@ This directory contains SQL files and documentation for applying the role-based 
 - `DATABASE_URL` environment variable pointing to the target database.
 
 ## Optional: Start a local PostgreSQL instance
-If you need a local database, you can launch one with the provided Compose overlay:
+If you need a local database, start just the Postgres service from the main Compose file:
 
 ```bash
-docker compose -f docker-compose.db.yml up -d
+docker compose up -d --wait postgres
 ```
 
 ## Configure database connection
