@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from app import market_spec
-from app.dataset.features import COLUMNS, MODEL_FEATURES, build_features
+from app.dataset.features import COLUMNS, CORE_FEATURES, MODEL_FEATURES, OPTION_FEATURES, build_features
 from app.dataset.labels import build_labels
 from app.dataset.weeks import anchor_of_week, complete_anchors, sessions_next_week
 
@@ -25,9 +25,22 @@ def make_market(start=date(2024, 1, 2), end=date(2026, 4, 17), seed=7):
     return daily, vix, rates
 
 
-def build(daily, vix, rates):
+def make_indexes(daily, seed=11):
+    """The six index_daily series on the same sessions (VIX9D starts a few months in, like the real one)."""
+    rng = np.random.default_rng(seed)
+    n, days = len(daily), list(daily["date"])
+    walk = lambda base, step: base + np.cumsum(rng.normal(0, step, n))  # noqa: E731
+    series = {"VIX9D": walk(14, 0.3), "VIX3M": walk(18, 0.2), "VVIX": walk(85, 1.0), "SKEW": walk(140, 1.0),
+              "BAA10Y": walk(1.8, 0.01), "T10Y2Y": walk(0.3, 0.01)}
+    frames = [pd.DataFrame({"symbol": s, "date": days[60 if s == "VIX9D" else 0:],
+                            "close": v[60 if s == "VIX9D" else 0:]}) for s, v in series.items()]
+    return pd.concat(frames, ignore_index=True)
+
+
+def build(daily, vix, rates, indexes=None):
     anchors = complete_anchors(daily["date"])
-    return anchors, build_features(daily, vix, rates, anchors), build_labels(daily, anchors)
+    indexes = make_indexes(daily) if indexes is None else indexes
+    return anchors, build_features(daily, vix, rates, anchors, indexes=indexes), build_labels(daily, anchors)
 
 
 # ---------------------------------------------------------------- anchors
@@ -51,8 +64,9 @@ def test_no_lookahead_features_match_data_cut_at_the_anchor():
     daily, vix, rates = make_market()
     anchors, full, _ = build(daily, vix, rates)
     for a in (anchors[60], anchors[85], anchors[-1]):
-        cut = [df[df["date"] <= a] for df in (daily, vix, rates)]
-        truncated = build_features(*cut, [a]).iloc[0]
+        indexes = make_indexes(daily)
+        cut = [df[df["date"] <= a] for df in (daily, vix, rates, indexes)]
+        truncated = build_features(*cut[:3], [a], indexes=cut[3]).iloc[0]
         row = full[full["anchor_date"] == a].iloc[0]
         for col in MODEL_FEATURES + ("macd", "macd_signal", "historical_vol_20d", "atr_14"):
             assert row[col] == pytest.approx(truncated[col], nan_ok=True), f"{col} at {a} uses later data"
@@ -64,7 +78,7 @@ def test_future_data_changes_nothing_in_the_past():
     shocked = daily.copy()
     later = shocked["date"] > anchors[70]
     shocked.loc[later, ["open", "high", "low", "close"]] *= 2                # a crash/melt-up after anchor 70
-    after = build_features(shocked, vix, rates, anchors)
+    after = build_features(shocked, vix, rates, anchors, indexes=make_indexes(daily))
     cols = list(MODEL_FEATURES)
     pd.testing.assert_frame_equal(before.iloc[:71][cols], after.iloc[:71][cols])
 
@@ -87,7 +101,8 @@ def test_feature_values_are_sane():
     _, features, _ = build(daily, vix, rates)
     late = features.iloc[60:]                                               # past the 252-session warm-up
     assert list(features.columns) == list(COLUMNS)
-    assert late[list(MODEL_FEATURES)].notna().all().all()
+    assert late[list(CORE_FEATURES)].notna().all().all()
+    assert features[list(OPTION_FEATURES)].isna().all().all()             # no chains given
     assert late["rsi_14"].between(0, 100).all()
     assert (late["drawdown_52w"] <= 0).all() and late["vix_pct_1y"].between(0, 1).all()
     assert late["vix_hv_spread"].to_numpy() == pytest.approx((late["vix_close"] - late["historical_vol_20d"]).to_numpy())
@@ -131,3 +146,30 @@ def test_a_missing_session_drops_that_weeks_label():
     anchors = complete_anchors(gappy["date"])
     labelled = set(build_labels(gappy, anchors)["anchor_date"])
     assert date(2026, 3, 27) not in labelled and date(2026, 3, 20) in labelled
+
+
+def test_index_features_and_fred_taken_before_the_anchor():
+    daily, vix, rates = make_market()
+    indexes = make_indexes(daily)
+    anchors, features, _ = build(daily, vix, rates, indexes)
+    a = anchors[70]
+    row = features[features["anchor_date"] == a].iloc[0]
+    ix = {s: g.set_index("date")["close"] for s, g in indexes.groupby("symbol")}
+    v = vix.set_index("date")["close"]
+    assert row["vix9d_ratio"] == pytest.approx(ix["VIX9D"][a] / v[a])
+    assert row["vix_term"] == pytest.approx(v[a] / ix["VIX3M"][a])
+    assert row["skew_index"] == pytest.approx(ix["SKEW"][a])                 # CBOE: the anchor's own close
+    baa = ix["BAA10Y"]
+    assert row["baa10y"] == pytest.approx(baa[baa.index < a].iloc[-1])       # FRED: the day before
+    assert features["vix9d"].iloc[:5].isna().all()                          # before VIX9D's history starts
+
+
+def test_support_resistance_distances():
+    daily, vix, rates = make_market()
+    anchors, features, _ = build(daily, vix, rates)
+    a = anchors[80]
+    row = features[features["anchor_date"] == a].iloc[0]
+    d = daily[daily["date"] <= a].tail(20)
+    c = d["close"].iloc[-1]
+    assert row["dist_high_20d"] == pytest.approx(c / d["high"].max() - 1) and row["dist_high_20d"] <= 0
+    assert row["dist_low_20d"] == pytest.approx(c / d["low"].min() - 1) and row["dist_low_20d"] >= 0

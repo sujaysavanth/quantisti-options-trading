@@ -6,7 +6,7 @@ from datetime import date
 from typing import Optional
 
 from ..dataset import store
-from ..dataset.features import FEATURE_VERSION, MODEL_FEATURES
+from ..dataset.features import CORE_FEATURES, FEATURE_VERSION, MODEL_FEATURES, OPTION_FEATURES
 from ..db.connection import get_db_connection, return_db_connection
 from ..models.features import PriceFeatures, TechnicalIndicators, VolatilityFeatures, WeeklyFeatures
 
@@ -35,12 +35,15 @@ class FeatureService:
         with _connection() as conn:
             features, labels = store.build(conn, symbol)
             n_features, n_labels = store.save(conn, features, labels, symbol)
-        complete = features.dropna(subset=list(MODEL_FEATURES))
+            n_oi = store.save_oi_levels(conn, store.build_oi_levels(conn, symbol), symbol)
+        complete = features.dropna(subset=list(CORE_FEATURES))
         summary = {
             "symbol": symbol,
             "weeks": n_features,
-            "weeks_with_all_features": len(complete),
+            "weeks_with_all_core_features": len(complete),
+            "weeks_with_option_features": int(features[list(OPTION_FEATURES)].notna().all(axis=1).sum()),
             "labelled_weeks": n_labels,
+            "weeks_with_oi_levels": n_oi,
             "first_anchor": features["anchor_date"].min() if n_features else None,
             "last_anchor": features["anchor_date"].max() if n_features else None,
             "feature_version": FEATURE_VERSION,

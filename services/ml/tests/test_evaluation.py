@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.dataset.features import MODEL_FEATURES
+from app.dataset.features import CORE_FEATURES
 from app.evaluation import report, walkforward
 from app.evaluation.baselines import (NORMAL_Z, Context, Garch, HarRv, RealisedVol, VixRaw, VixScaled,
                                       all_baselines, straddle_sigma)
@@ -82,7 +82,7 @@ def test_realised_vol_uses_the_same_quantile_mapping():
 def synthetic_rows():
     daily, vix, rates = make_market(start=date(2016, 1, 4), end=date(2025, 12, 31), seed=3)
     anchors, features, labels = build(daily, vix, rates)
-    data = features.dropna(subset=list(MODEL_FEATURES)).merge(labels, on="anchor_date")
+    data = features.dropna(subset=list(CORE_FEATURES)).merge(labels, on="anchor_date")
     return daily, data
 
 
@@ -120,7 +120,7 @@ def test_straddle_sigma_from_atm_quotes():
         "strike": [3230.0, 3230.0, 3235.0, 3235.0, 3500.0, 3500.0],
         "option_type": ["C", "P", "C", "P", "C", "P"],
         "bid": [30.0, 28.0, 27.0, 31.0, 1.0, 1.0], "ask": [31.0, 29.0, 28.0, 32.0, 1.2, 1.2],
-        "underlying_price": [3234.0] * 4 + [3265.0] * 2})
+        "underlying_price": [3234.0] * 4 + [3265.0] * 2, "source": ["optionsdx"] * 6})
     sig = straddle_sigma(quotes)
     assert sig[date(2020, 1, 3)] == pytest.approx((27.5 + 31.5) / 3234 / math.sqrt(2 / math.pi))   # nearest strike
     assert date(2020, 1, 10) not in sig                                       # nothing within 1% of spot

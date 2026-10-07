@@ -20,26 +20,40 @@ Two groups of columns:
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
+from .options import OPTION_FEATURE_COLUMNS
 from .weeks import monday_of, sessions_next_week
 
-FEATURE_VERSION = 1
+FEATURE_VERSION = 2
 TRADING_DAYS = 252
 
-MODEL_FEATURES = (
-    "ret_1w", "ret_4w", "range_1w",                     # this week and the last month
-    "rv_5d", "rv_20d", "rv_60d",                        # realised vol, annualised, decimal
-    "vix_close", "vix_change_1w", "vix_hv_spread", "vix_pct_1y",
-    "rsi_14", "bb_width", "atr_pct", "dist_ma50", "drawdown_52w", "volume_ratio",
-    "rate_3m", "sessions_next",
-)
+# Feature groups: ML-3 adds one group at a time and keeps it only if the walk-forward score improves.
+FEATURE_GROUPS = {
+    "price":              ("ret_1w", "ret_4w", "range_1w"),
+    "realised_vol":       ("rv_5d", "rv_20d", "rv_60d"),
+    "vix":                ("vix_close", "vix_change_1w", "vix_hv_spread", "vix_pct_1y"),
+    "vix_term":           ("vix9d", "vix9d_ratio", "vix_term", "vvix"),     # term structure and vol of vol
+    "tail":               ("skew_index",),
+    "credit_macro":       ("baa10y", "baa10y_chg_4w", "t10y2y", "rate_3m"),
+    "technical":          ("rsi_14", "bb_width", "atr_pct", "dist_ma50", "volume_ratio"),
+    "support_resistance": ("dist_high_20d", "dist_low_20d", "drawdown_52w", "dist_low_52w"),
+    "calendar":           ("sessions_next",),
+    "options":            OPTION_FEATURE_COLUMNS,                           # missing 2024 .. Sep 2026 (no real chains)
+}
+OPTION_FEATURES = FEATURE_GROUPS["options"]
+# Present for every week after the warm-up (2011-01-07 on, once VIX9D has history).
+CORE_FEATURES = tuple(f for group, cols in FEATURE_GROUPS.items() if group != "options" for f in cols)
+MODEL_FEATURES = CORE_FEATURES + OPTION_FEATURES
+
 LEGACY_ONLY = ("weekly_change_pct", "weekly_high_low_range_pct", "macd", "macd_signal",
                "historical_vol_10d", "historical_vol_20d", "atr_14")
 COLUMNS = ("week_start_date", "anchor_date", *LEGACY_ONLY, *MODEL_FEATURES)
+CBOE_INDEXES = ("VIX9D", "VIX3M", "VVIX", "SKEW")        # closes known at the anchor's close
+FRED_INDEXES = ("BAA10Y", "T10Y2Y")                      # posted a day late: taken strictly before the anchor
 
 
 def _series(df: pd.DataFrame, column: str) -> pd.Series:
@@ -83,13 +97,19 @@ def daily_indicators(daily: pd.DataFrame) -> pd.DataFrame:
         "atr_pct": atr14 / c,
         "dist_ma50": c / c.rolling(50).mean() - 1,
         "drawdown_52w": c / c.rolling(TRADING_DAYS).max() - 1,
+        "dist_high_20d": c / h.rolling(20).max() - 1,              # <= 0: how far below the month's high
+        "dist_low_20d": c / lo.rolling(20).min() - 1,              # >= 0: how far above the month's low
+        "dist_low_52w": c / lo.rolling(TRADING_DAYS).min() - 1,
         "volume_ratio": v / v.rolling(20).mean(),
     })
 
 
 def build_features(daily: pd.DataFrame, vix: pd.DataFrame, rates: pd.DataFrame,
-                   anchors: Sequence) -> pd.DataFrame:
-    """One row per anchor. `daily`: date/open/high/low/close/volume; `vix`: date/close; `rates`: date/rate."""
+                   anchors: Sequence, indexes: Optional[pd.DataFrame] = None,
+                   options: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """One row per anchor. `daily`: date/open/high/low/close/volume; `vix`: date/close; `rates`: date/rate;
+    `indexes`: symbol/date/close (index_daily); `options`: anchor_date + OPTION_FEATURE_COLUMNS (options.py),
+    already computed from the anchor's own chain. Missing inputs leave their features empty (NaN)."""
     if not len(anchors):
         return pd.DataFrame(columns=COLUMNS)
     ind = daily_indicators(daily)
@@ -121,6 +141,30 @@ def build_features(daily: pd.DataFrame, vix: pd.DataFrame, rates: pd.DataFrame,
     out["rate_3m"] = _asof(_series(rates, "rate"), at, strict=True)             # FRED posts a day late
     out["sessions_next"] = [sessions_next_week(a.date()) for a in at]
 
+    idx = {s: g for s, g in indexes.groupby("symbol")} if indexes is not None and len(indexes) else {}
+
+    def index_asof(symbol: str, when=at) -> np.ndarray:
+        if symbol not in idx:
+            return np.full(len(when), np.nan)
+        return _asof(_series(idx[symbol], "close"), when, strict=symbol in FRED_INDEXES)
+
+    vix9d, vix3m = index_asof("VIX9D"), index_asof("VIX3M")
+    out["vix9d"] = vix9d
+    out["vix9d_ratio"] = vix9d / vix_now          # > 1: next week's fear above the month's (stress)
+    out["vix_term"] = vix_now / vix3m             # > 1: inverted term structure
+    out["vvix"] = index_asof("VVIX")
+    out["skew_index"] = index_asof("SKEW")
+    baa = index_asof("BAA10Y")
+    out["baa10y"] = baa
+    out["baa10y_chg_4w"] = baa - index_asof("BAA10Y", mondays - pd.Timedelta(days=21))
+    out["t10y2y"] = index_asof("T10Y2Y")
+
     out.insert(0, "anchor_date", [a.date() for a in at])
+    for col in OPTION_FEATURES:
+        out[col] = np.nan
+    if options is not None and len(options):
+        by_anchor = options.set_index("anchor_date")
+        for col in OPTION_FEATURES:
+            out[col] = out["anchor_date"].map(by_anchor[col]).astype(float).to_numpy()
     out.insert(0, "week_start_date", [m.date() for m in mondays])
     return out.reset_index(drop=True)[list(COLUMNS)]

@@ -18,15 +18,31 @@ the week's SPX expiry.
 - **No lookahead** is tested: rebuilding from data cut off at an anchor gives the same features, and changing
   future prices changes nothing in the past (`tests/test_dataset.py`).
 
-Model features (`MODEL_FEATURES`, scale-free so 2010 and 2026 are comparable):
+Model features (feature version 2), in groups (`FEATURE_GROUPS`) so ML-3 can add one group at a time and keep it
+only if the walk-forward score improves:
 
-| Group | Features |
-|---|---|
-| Returns | `ret_1w`, `ret_4w` (log), `range_1w` (week high - low, / close) |
-| Realised vol | `rv_5d`, `rv_20d`, `rv_60d` (annualised, decimal) |
-| VIX | `vix_close`, `vix_change_1w` (points since last week), `vix_hv_spread` (VIX - 20d realised vol, %), `vix_pct_1y` (0..1) |
-| Technical | `rsi_14`, `bb_width`, `atr_pct`, `dist_ma50`, `drawdown_52w`, `volume_ratio` |
-| Rates, calendar | `rate_3m` (taken before the anchor: FRED posts a day late), `sessions_next` (4 in holiday weeks) |
+| Group | Features | Source |
+|---|---|---|
+| `price` | `ret_1w`, `ret_4w` (log), `range_1w` (week high - low, / close) | SPX daily |
+| `realised_vol` | `rv_5d`, `rv_20d`, `rv_60d` (annualised, decimal) | SPX daily |
+| `vix` | `vix_close`, `vix_change_1w`, `vix_hv_spread` (VIX - 20d realised vol), `vix_pct_1y` | VIX |
+| `vix_term` | `vix9d`, `vix9d_ratio` (VIX9D/VIX), `vix_term` (VIX/VIX3M; > 1 = inverted), `vvix` | `index_daily` (CBOE) |
+| `tail` | `skew_index` (CBOE SKEW) | `index_daily` |
+| `credit_macro` | `baa10y`, `baa10y_chg_4w`, `t10y2y`, `rate_3m` (all taken before the anchor: FRED posts a day late) | `index_daily`, `rates_daily` |
+| `technical` | `rsi_14`, `bb_width`, `atr_pct`, `dist_ma50`, `volume_ratio` | SPX daily |
+| `support_resistance` | `dist_high_20d`, `dist_low_20d`, `drawdown_52w`, `dist_low_52w` | SPX daily |
+| `calendar` | `sessions_next` (4 in holiday weeks) | NYSE calendar |
+| `options` | `atm_iv_1w` (next week's ATM straddle, annualised), `skew_25d` (25-delta put IV - call IV), `pc_volume_ratio` | the anchor's chain for next week's expiry (`options.py`) |
+
+`CORE_FEATURES` (every group but `options`) exist for every week from 2011-01-07 (once VIX9D has history).
+The option features exist where real chains do: OptionsDX 2010-2023 (98% of weeks) and CBOE from October 2026;
+**not 2024 to September 2026**, so models must handle them missing. An event calendar (Fed meetings, CPI and jobs
+reports in the coming week) is planned for the next sprint.
+
+**Open-interest levels** (`oi_levels.py`, table `weekly_oi_levels`) are recorded every week from live CBOE chains
+but are not a model feature yet: OptionsDX has no open interest, so there is no history to train on. Put wall,
+call wall, max pain and a naive dealer gamma exposure (GEX) for next week's expiry; after about a year they can
+be tested. `python -m app.cli oi-levels --date 2026-10-06` shows them for any collected day.
 
 `weekly_features` also keeps its original columns (RSI, MACD, Bollinger width, ATR and historical vol in their
 original definitions). `weekly_change_pct` and `weekly_high_low_range_pct` used to be measured over the whole
@@ -66,6 +82,8 @@ python -m app.cli evaluate --database-url postgresql://quantisti:quantisti@local
 docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/001_create_weekly_features_table.sql
 docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/002_add_vix_features.sql
 docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/003_weekly_dataset.sql   # safe to re-run
+docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/004_more_features.sql    # safe to re-run
+# The index features need index_daily filled (schema/sql/011 + ingest `backfill-daily --indexes`).
 
 # Build every week (about a second), store it, print a report:
 cd services/ml && pip install -e ".[test]"

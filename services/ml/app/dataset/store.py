@@ -7,8 +7,8 @@ was built years ago or today.
 
 from __future__ import annotations
 
-from datetime import date
-from typing import Optional, Tuple
+from datetime import date, timedelta
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,29 +16,80 @@ from psycopg2.extras import RealDictCursor, execute_values
 
 from . import features as F
 from . import labels as L
-from .weeks import complete_anchors, monday_of
+from . import oi_levels as OI
+from . import options as O
+from .weeks import anchor_of_week, complete_anchors, monday_of, sessions_next_week
 
 SYMBOL = "SPX"   # underlying_daily also has a symbol column, but only SPX is loaded
+OI_COLUMNS = ("spot", "put_wall", "call_wall", "max_pain", "gex", "contracts")
+
+
+def _frame(conn, sql, params=()) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+        cols = [c.name for c in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=cols)
 
 
 def load_market(conn, symbol: str = SYMBOL) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """(daily OHLCV, VIX closes, 3-month T-bill rates) as DataFrames, oldest first."""
-    def frame(sql, params=()):
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            cols = [c.name for c in cur.description]
-            return pd.DataFrame(cur.fetchall(), columns=cols)
-    daily = frame("SELECT date, open, high, low, close, volume FROM underlying_daily WHERE symbol = %s ORDER BY date",
-                  (symbol,))
-    vix = frame("SELECT date, close FROM vix_daily ORDER BY date")
-    rates = frame("SELECT date, rate FROM rates_daily ORDER BY date")
+    daily = _frame(conn, "SELECT date, open, high, low, close, volume FROM underlying_daily WHERE symbol = %s ORDER BY date",
+                   (symbol,))
+    vix = _frame(conn, "SELECT date, close FROM vix_daily ORDER BY date")
+    rates = _frame(conn, "SELECT date, rate FROM rates_daily ORDER BY date")
     return daily, vix, rates
+
+
+def load_indexes(conn) -> pd.DataFrame:
+    """index_daily (VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y); empty if the table doesn't exist yet."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('index_daily') IS NOT NULL")
+        if not cur.fetchone()[0]:
+            return pd.DataFrame(columns=["symbol", "date", "close"])
+    return _frame(conn, "SELECT symbol, date, close FROM index_daily ORDER BY symbol, date")
+
+
+def next_expiries(anchors) -> List[Tuple[date, date]]:
+    """(anchor, next week's anchor = expiry) from the calendar, so the latest week has one too."""
+    return [(a, n) for a in anchors if (n := anchor_of_week(a + timedelta(days=7))) is not None]
 
 
 def build(conn, symbol: str = SYMBOL) -> Tuple[pd.DataFrame, pd.DataFrame]:
     daily, vix, rates = load_market(conn, symbol)
     anchors = complete_anchors(daily["date"])
-    return F.build_features(daily, vix, rates, anchors), L.build_labels(daily, anchors)
+    pairs = next_expiries(anchors)
+    chains = load_anchor_chains(conn, pairs, symbol)
+    sessions = {a: sessions_next_week(a) for a in anchors}
+    options = O.option_features(chains, sessions)
+    features = F.build_features(daily, vix, rates, anchors, indexes=load_indexes(conn), options=options)
+    return features, L.build_labels(daily, anchors)
+
+
+def build_oi_levels(conn, symbol: str = SYMBOL) -> pd.DataFrame:
+    """Open-interest levels for next week's expiry at every anchor with live CBOE open interest."""
+    daily, _, rates = load_market(conn, symbol)
+    pairs = next_expiries(complete_anchors(daily["date"]))
+    chains = load_anchor_chains(conn, pairs, symbol, sources=("cboe",))
+    rate_by_day = dict(zip(rates["date"], rates["rate"].astype(float)))
+    rows = []
+    for (anchor, expiry), g in chains.groupby(["anchor_date", "expiry_date"]):
+        years = (expiry - anchor).days / 365
+        levels = OI.oi_levels(g, years, rate_by_day.get(anchor, 0.04))
+        if levels:
+            rows.append({"anchor_date": anchor, "expiry_date": expiry, "source": "cboe", **levels})
+    return pd.DataFrame(rows, columns=["anchor_date", "expiry_date", "source", *OI_COLUMNS])
+
+
+def save_oi_levels(conn, levels: pd.DataFrame, symbol: str = SYMBOL) -> int:
+    cols = ["symbol", "anchor_date", "expiry_date", "source", *OI_COLUMNS]
+    rows = [tuple(_clean(v) for v in (symbol, *r)) for r in levels[cols[1:]].itertuples(index=False)]
+    if rows:
+        with conn.cursor() as cur:
+            execute_values(cur, f"""
+                INSERT INTO weekly_oi_levels ({", ".join(cols)}) VALUES %s
+                ON CONFLICT (symbol, anchor_date) DO UPDATE SET
+                    {", ".join(f"{c} = EXCLUDED.{c}" for c in cols[2:])}, updated_at = now()""", rows)
+    return len(rows)
 
 
 def _clean(value):
@@ -89,26 +140,34 @@ def read_latest(conn, symbol: str) -> Optional[dict]:
         return cur.fetchone()
 
 
-def load_straddle_quotes(conn, pairs, symbol: str = SYMBOL) -> pd.DataFrame:
-    """Near-the-money OptionsDX quotes (strikes within 1% of spot) for each (anchor_date, expiry_date) pair:
-    the chain at a week's close for next week's expiry. Real quotes exist for 2010-2023 only."""
-    columns = ["anchor_date", "strike", "option_type", "bid", "ask", "underlying_price"]
+CHAIN_COLUMNS = ["anchor_date", "expiry_date", "source", "strike", "option_type", "bid", "ask",
+                 "vendor_iv", "vendor_delta", "volume", "open_interest", "underlying_price"]
+
+
+def load_anchor_chains(conn, pairs: Sequence[Tuple[date, date]], symbol: str = SYMBOL,
+                       sources: Optional[Sequence[str]] = None, moneyness: float = 0.05) -> pd.DataFrame:
+    """Quotes taken on each anchor date for the paired expiry (next week's), strikes within `moneyness` of spot,
+    every source (or only `sources`). Real chains: OptionsDX 2010-2023, CBOE and Yahoo since October 2026."""
     if not pairs:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(columns=CHAIN_COLUMNS)
     with conn.cursor() as cur:
         values = ",".join(cur.mogrify("(%s::date, %s::date)", tuple(p)).decode() for p in pairs)   # quoted by psycopg2
+        source_filter = "AND s.source = ANY(%s)" if sources else ""
+        params = (symbol, moneyness, list(sources)) if sources else (symbol, moneyness)
         cur.execute(f"""
             WITH want(anchor_date, expiry_date) AS (VALUES {values})
-            SELECT w.anchor_date, s.strike, s.option_type, s.bid, s.ask, s.underlying_price
+            SELECT w.anchor_date, w.expiry_date, s.source, s.strike, s.option_type, s.bid, s.ask,
+                   s.vendor_iv, s.vendor_delta, s.volume, s.open_interest, s.underlying_price
             FROM want w
             JOIN option_chain_snapshots s
-              ON s.symbol = %s AND s.source = 'optionsdx'
-             AND s.snapshot_date = w.anchor_date AND s.expiry_date = w.expiry_date
-            WHERE abs(s.strike - s.underlying_price) <= 0.01 * s.underlying_price""", (symbol,))
+              ON s.symbol = %s AND s.snapshot_date = w.anchor_date AND s.expiry_date = w.expiry_date
+            WHERE abs(s.strike - s.underlying_price) <= %s * s.underlying_price {source_filter}""", params)
         rows = cur.fetchall()
-    frame = pd.DataFrame(rows, columns=columns)
-    for c in ("strike", "bid", "ask", "underlying_price"):
+    frame = pd.DataFrame(rows, columns=CHAIN_COLUMNS)
+    for c in ("strike", "bid", "ask", "vendor_iv", "vendor_delta", "underlying_price"):
         frame[c] = frame[c].astype(float)
+    for c in ("volume", "open_interest"):
+        frame[c] = pd.to_numeric(frame[c])
     return frame
 
 

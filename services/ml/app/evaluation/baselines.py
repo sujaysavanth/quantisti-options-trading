@@ -12,14 +12,13 @@ constant bias in sigma, so the baselines differ only in how well they track vola
     har_rv      HAR-RV (Corsi 2009): next week's variance regressed on last day / week / month of
                 squared daily returns; the standard benchmark for volatility forecasting
     garch       GARCH(1,1) on daily returns (the `arch` package), summed over next week's sessions
-    straddle    the ATM straddle for next week's expiry at the anchor's close (real chains, 2010-2023 only)
+    straddle    the ATM straddle for next week's expiry at the anchor's close (real chains: OptionsDX 2010-2023, CBOE from Oct 2026)
 
 `fit` sees training weeks only; `predict` sees test weeks' features, never their labels.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from statistics import NormalDist
 from typing import Dict, List
@@ -27,6 +26,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
+from ..dataset.options import preferred_source, straddle_sigma_week
 from .metrics import QUANTILES
 
 TRADING_DAYS = 252
@@ -165,21 +165,14 @@ class Straddle(SigmaBaseline):
         return np.array([ctx.straddle_sigma.get(a, np.nan) for a in rows["anchor_date"]], dtype=float)
 
 
-def straddle_sigma(quotes: pd.DataFrame) -> Dict:
-    """quotes: anchor_date, strike, option_type, bid, ask, underlying_price for next week's expiry.
-    Uses the strike nearest spot with a two-sided call and put."""
+def straddle_sigma(chains: pd.DataFrame) -> Dict:
+    """chains: one anchor's quotes for next week's expiry per anchor_date (store.load_anchor_chains).
+    Weekly sigma from the ATM straddle of each anchor's preferred source (dataset/options.py)."""
     out = {}
-    q = quotes[(quotes["bid"] > 0) & (quotes["ask"] >= quotes["bid"])].copy()
-    q["mid"] = (q["bid"] + q["ask"]) / 2
-    for anchor, g in q.groupby("anchor_date"):
-        spot = float(g["underlying_price"].iloc[0])
-        pairs = g.pivot_table(index="strike", columns="option_type", values="mid", aggfunc="first").dropna()
-        if pairs.empty or not {"C", "P"} <= set(pairs.columns):
-            continue
-        k = pairs.index[np.argmin(np.abs(pairs.index.to_numpy() - spot))]
-        if abs(k - spot) / spot > 0.01:                                       # nothing near the money
-            continue
-        out[anchor] = (pairs.loc[k, "C"] + pairs.loc[k, "P"]) / spot / math.sqrt(2 / math.pi)
+    for anchor, g in chains.groupby("anchor_date"):
+        sigma = straddle_sigma_week(g[g["source"] == preferred_source(g)])
+        if sigma:
+            out[anchor] = sigma
     return out
 
 

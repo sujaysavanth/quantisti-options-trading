@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import math
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -19,19 +20,30 @@ import psycopg2
 
 from .config import get_settings
 from .dataset import store
-from .dataset.features import MODEL_FEATURES
+from .dataset.features import CORE_FEATURES, FEATURE_GROUPS
 
 Z80 = 1.2816   # 10% / 90% quantiles of a standard normal
 
 
+def coverage_by_group(data) -> None:
+    """Share of training weeks with each feature group present, overall and per era."""
+    eras = {"2011-2023": data["anchor_date"].map(lambda d: d.year <= 2023),
+            "2024-now": data["anchor_date"].map(lambda d: d.year >= 2024)}
+    print(f"{'feature group':20} {'features':>8} " + " ".join(f"{e:>10}" for e in eras))
+    for group, cols in FEATURE_GROUPS.items():
+        present = data[list(cols)].notna().all(axis=1)
+        print(f"{group:20} {len(cols):>8} " + " ".join(f"{present[m].mean():>10.0%}" for m in eras.values()))
+
+
 def report(features, labels) -> None:
-    complete = features.dropna(subset=list(MODEL_FEATURES))
+    complete = features.dropna(subset=list(CORE_FEATURES))
     data = complete.merge(labels, on="anchor_date")
     print(f"weeks: {len(features)} ({features['anchor_date'].min()} .. {features['anchor_date'].max()}), "
-          f"with all features: {len(complete)} (from {complete['anchor_date'].min()}), "
+          f"with all core features: {len(complete)} (from {complete['anchor_date'].min()}), "
           f"usable for training (features + label): {len(data)}")
     if data.empty:
         return
+    coverage_by_group(data)
     r = data["close_ret"]
     q = np.percentile(r, [5, 10, 50, 90, 95]) * 100
     print(f"next-week close return: mean {r.mean() * 100:+.2f}%  std {r.std() * 100:.2f}% "
@@ -49,9 +61,11 @@ def report(features, labels) -> None:
 def build_dataset(args) -> None:
     with psycopg2.connect(args.database_url) as conn:
         features, labels = store.build(conn)
+        oi = store.build_oi_levels(conn)
         if not args.no_write:
             n_features, n_labels = store.save(conn, features, labels)
-            print(f"stored {n_features} weeks of features and {n_labels} labels")
+            n_oi = store.save_oi_levels(conn, oi)
+            print(f"stored {n_features} weeks of features, {n_labels} labels, {n_oi} weeks of open-interest levels")
     report(features, labels)
     if args.export:
         out = features.merge(labels, on="anchor_date", how="left")
@@ -67,8 +81,9 @@ def default_reports_dir() -> Path:
 
 
 def training_rows(features, labels):
-    """Weeks with every model feature and a label: what forecasters are fitted and scored on."""
-    return features.dropna(subset=list(MODEL_FEATURES)).merge(labels, on="anchor_date")
+    """Weeks with every core feature and a label: what forecasters are fitted and scored on.
+    Option features may be missing (no real chains 2024 .. Sep 2026); models must handle that."""
+    return features.dropna(subset=list(CORE_FEATURES)).merge(labels, on="anchor_date")
 
 
 def evaluate(args) -> None:
@@ -79,11 +94,11 @@ def evaluate(args) -> None:
         features, labels = store.build(conn)
         daily, _, _ = store.load_market(conn)
         data = training_rows(features, labels)
-        pairs = [(a, n) for a, n in zip(data["anchor_date"], data["next_anchor_date"]) if a.year <= 2023]
-        quotes = store.load_straddle_quotes(conn, pairs)
-    ctx = Context(daily[["date", "close"]], straddle_sigma(quotes))
+        pairs = list(zip(data["anchor_date"], data["next_anchor_date"]))
+        chains = store.load_anchor_chains(conn, pairs, moneyness=0.01)
+    ctx = Context(daily[["date", "close"]], straddle_sigma(chains))
     print(f"{len(data)} weeks ({data['anchor_date'].min()} .. {data['anchor_date'].max()}), "
-          f"ATM straddle found for {len(ctx.straddle_sigma)} of {len(pairs)} weeks up to 2023")
+          f"ATM straddle found for {len(ctx.straddle_sigma)} weeks")
 
     baselines = all_baselines()
     last_year = max(a.year for a in data["anchor_date"])
@@ -94,6 +109,32 @@ def evaluate(args) -> None:
     print("\nwritten: " + ", ".join(str(p) for p in paths))
 
 
+def oi_levels(args) -> None:
+    """Any day's levels, not just anchors: lets you look at the recorder before the first weekly anchor has OI."""
+    from datetime import timedelta
+
+    from .dataset.oi_levels import oi_levels as compute
+    from .dataset.weeks import anchor_of_week
+
+    expiry = args.expiry or anchor_of_week(args.date)                     # this week's expiry if still ahead...
+    if expiry is None or expiry <= args.date:
+        expiry = anchor_of_week(args.date + timedelta(days=7))           # ...else next week's (as for anchors)
+    with psycopg2.connect(args.database_url) as conn:
+        chain = store.load_anchor_chains(conn, [(args.date, expiry)], sources=("cboe",))
+    levels = compute(chain, max((expiry - args.date).days, 1) / 365)
+    if not levels:
+        raise SystemExit(f"no CBOE open interest for the {expiry} expiry on {args.date}")
+    def fmt(value, spec=",.0f", scale=1.0, suffix=""):
+        return "n/a" if value is None else f"{value / scale:{spec}}{suffix}"
+
+    print(f"{args.date} -> expiry {expiry}: spot {fmt(levels['spot'], ',.2f')}  put wall {fmt(levels['put_wall'])}  "
+          f"call wall {fmt(levels['call_wall'])}  max pain {fmt(levels['max_pain'])}  "
+          f"GEX {fmt(levels['gex'], '+.2f', 1e9, 'bn $ per 1%')}  "
+          f"({levels['contracts']:,} contracts, strikes within 5% of spot)")
+    if levels["gex"] is None:
+        print("GEX needs implied vols; this capture has none")
+
+
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -102,6 +143,13 @@ def main(argv=None) -> None:
     p.add_argument("--export", help="also write features + labels to this CSV (data/ is git-ignored)")
     p.add_argument("--no-write", action="store_true", help="don't store anything, just report")
     p.set_defaults(run=build_dataset)
+
+    p = sub.add_parser("oi-levels", help="open-interest levels (walls, max pain, GEX) from a day's CBOE chain")
+    p.add_argument("--date", type=date.fromisoformat, required=True, help="snapshot date, e.g. 2026-10-06")
+    p.add_argument("--expiry", type=date.fromisoformat,
+                   help="default: this week's last session if still ahead, else next week's")
+    p.add_argument("--database-url", default=get_settings().DATABASE_URL)
+    p.set_defaults(run=oi_levels)
 
     p = sub.add_parser("evaluate", help="walk-forward evaluation of the baselines; writes a report")
     p.add_argument("--database-url", default=get_settings().DATABASE_URL)
