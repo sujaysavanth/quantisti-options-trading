@@ -13,6 +13,7 @@ dependencies = [
     "yfinance>=0.2.40",
     "exchange_calendars>=4.5",
     "confluent-kafka>=2.3.0",
+    "psycopg2-binary>=2.9",
 ]
 
 [project.optional-dependencies]

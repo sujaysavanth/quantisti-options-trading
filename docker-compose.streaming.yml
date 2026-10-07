@@ -69,12 +69,16 @@ services:
         condition: service_healthy
       kafka-init:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     ports:
       - "${INGEST_HOST_PORT:-8088}:8087"   # 8088 on the host by default, since 8087 is often taken
     environment:
       KAFKA_BOOTSTRAP: kafka:9092
       CHAIN_SOURCE: cboe
       PRODUCERS_ENABLED: "true"
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti   # gap detector reads coverage here
+      GAPS_ENABLED: "true"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8087/health/readyz')"]

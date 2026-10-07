@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     MARKET_STREAM_URL: str = "http://market_stream:8090"
     BRIDGE_MIN_DTE: int = 1
 
+    # Gap detector + backfill worker: the database it checks, and how often.
+    DATABASE_URL: str = "postgresql://quantisti:quantisti@postgres:5432/quantisti"
+    GAPS_ENABLED: bool = True
+    GAP_SCAN_MINUTES: int = 60          # full scan: find gaps and request backfills
+    GAP_RECHECK_SECONDS: int = 120      # cheap pass: mark requested gaps filled once the data is stored
+
 
 @lru_cache
 def get_settings() -> Settings:

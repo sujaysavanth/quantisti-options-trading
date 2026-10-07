@@ -10,6 +10,8 @@ or run the Kafka producers once.
     python -m app.cli poll-once --daily --bootstrap localhost:9094     # from your machine
     python -m app.cli backfill-intraday --max                          # all the intraday history Yahoo still has
     python -m app.cli backfill-intraday --days 5 --interval 1m --symbol SPX
+    python -m app.cli scan-gaps --dry-run                              # print gaps, change nothing
+    python -m app.cli scan-gaps                                        # same as POST /v1/gaps/scan
 """
 
 from __future__ import annotations
@@ -103,6 +105,33 @@ def backfill_intraday(args) -> None:
     print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
 
 
+def scan_gaps(args) -> None:
+    from collections import Counter
+
+    from .db import connect
+    from .gaps import store
+    from .gaps.detector import find_gaps, known_ranges
+
+    now = datetime.now(timezone.utc)
+    with connect(args.database_url) as conn:
+        if args.dry_run:
+            cov = store.load_coverage(conn, now)
+            gaps = find_gaps(cov, now)
+            for k in known_ranges(cov, now.date()):
+                print(f"known   {k.dataset:8} {k.start} .. {k.end}  {k.reason}")
+            print(f"{len(gaps)} gaps: {dict(Counter(g.dataset for g in gaps))}")
+            for g in gaps[-args.limit:]:
+                print(f"{g.gap_date}  {g.dataset:8} {g.symbol:7} {g.detail}")
+            return
+
+        from .gaps.scan import scan
+        from .producers.kafka import Publisher
+        publisher = Publisher(args.bootstrap)
+        if error := publisher.ping():
+            raise SystemExit(f"Kafka at {args.bootstrap} is not reachable: {error}")
+        print(vars(scan(conn, publisher, now)))
+
+
 def main(argv=None) -> None:
     settings = get_settings()
     parser = argparse.ArgumentParser(prog="python -m app.cli", description="Fetch market data and print it")
@@ -142,6 +171,14 @@ def main(argv=None) -> None:
     p.add_argument("--symbol", default="SPX,VIX", help="comma-separated: SPX,VIX")
     p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
     p.set_defaults(run=backfill_intraday)
+
+    p = sub.add_parser("scan-gaps", help="find missing data; request backfills (or only print with --dry-run)")
+    p.add_argument("--dry-run", action="store_true", help="print the gaps; write nothing, publish nothing")
+    p.add_argument("--limit", type=int, default=30, help="most recent gaps to print with --dry-run")
+    p.add_argument("--database-url", default=settings.DATABASE_URL,
+                   help="postgresql://quantisti:quantisti@localhost:5432/quantisti from your machine")
+    p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
+    p.set_defaults(run=scan_gaps)
 
     args = parser.parse_args(argv)
     if args.command == "poll-once" and not (args.intraday or args.chain or args.daily or args.all):

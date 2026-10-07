@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 TOPIC_BARS = "market.bars.1m"
 TOPIC_CHAIN = "options.chain.quotes"
 TOPIC_DAILY = "market.daily"
+TOPIC_BACKFILL = "ingest.backfill.requests"
+TOPIC_DLQ = "ingest.dlq"
 
 PRODUCER_CONFIG = {
     # Idempotent producer: the broker drops duplicates caused by retries, and order per
@@ -50,7 +52,11 @@ class Publisher:
             self.delivered[msg.topic()] += 1
 
     def send(self, topic: str, key: str, envelope: Envelope) -> None:
-        kwargs = dict(key=key.encode(), value=envelope.to_bytes(), on_delivery=self._on_delivery)
+        self.send_raw(topic, key, envelope.to_bytes())
+
+    def send_raw(self, topic: str, key: str, value: bytes) -> None:
+        """For messages that aren't envelopes, such as DLQ entries."""
+        kwargs = dict(key=key.encode(), value=value, on_delivery=self._on_delivery)
         try:
             self._producer.produce(topic, **kwargs)
         except BufferError:

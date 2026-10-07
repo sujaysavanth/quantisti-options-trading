@@ -77,8 +77,25 @@ class DailyPayload(BaseModel):
         return self
 
 
-PAYLOADS = {"bars.v1": BarPayload, "chain.v1": ChainPayload, "daily.v1": DailyPayload}
-Payload = Union[BarPayload, ChainPayload, DailyPayload]
+class BackfillPayload(BaseModel):
+    """A request to refill one session of one dataset (from the gap detector to the backfill worker)."""
+
+    dataset: Literal["daily", "vix", "rates", "intraday", "chain"]
+    symbol: str                             # as in ingest_gaps: SPX, VIX, DGS3MO, "SPX:1m"
+    date: date
+    attempt: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _intraday_symbol(self):
+        if self.dataset == "intraday":
+            symbol, _, interval = self.symbol.partition(":")
+            if symbol not in ("SPX", "VIX") or interval not in ("1m", "5m", "1h"):
+                raise ValueError(f"intraday symbol must look like SPX:1m, got {self.symbol!r}")
+        return self
+
+
+PAYLOADS = {"bars.v1": BarPayload, "chain.v1": ChainPayload, "daily.v1": DailyPayload, "backfill.v1": BackfillPayload}
+Payload = Union[BarPayload, ChainPayload, DailyPayload, BackfillPayload]
 
 
 class Envelope(BaseModel):
