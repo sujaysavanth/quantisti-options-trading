@@ -1,14 +1,14 @@
 """Machine learning and feature engineering service.
 
 Purpose:
-    - Compute and store features for ML models
-    - Host predictive models for strategy recommendations
-    - Provide feature engineering pipeline
+    - Build point-in-time weekly features and next-week labels (app/dataset/)
+    - Host the weekly SPX range forecast (planned)
 
 Endpoints:
-    - /v1/features/* - Feature computation and retrieval
-    - /v1/predict - Model predictions (TODO)
-    - /v1/model/* - Model management (TODO)
+    - /v1/features/* - weekly features: build all weeks (backfill), read one or the latest
+    - /v1/predict - model predictions (planned)
+
+CLI: python -m app.cli build-dataset (see app/cli.py).
 """
 
 import logging

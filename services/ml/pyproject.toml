@@ -13,6 +13,8 @@ dependencies = [
     "numpy",
     "httpx",
     "python-dateutil",
+    "exchange_calendars>=4.5",
+    "arch>=7.0",                 # GARCH baseline (app/evaluation/baselines.py)
 ]
 
 [project.optional-dependencies]
