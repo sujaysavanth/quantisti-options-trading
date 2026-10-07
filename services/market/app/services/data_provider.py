@@ -2,7 +2,7 @@
 
 import logging
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 from psycopg2.extras import RealDictCursor
@@ -12,6 +12,7 @@ from ..config import get_settings
 from ..db.connection import get_db_connection, return_db_connection
 from ..models.market_data import CandleData
 from .chains import Quote, build_snapshot_chain, build_synthetic_chain, preferred_snapshot_source
+from .live import Spot, default_session, pick_spot, snapshot_as_of
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,60 @@ class DataProvider:
             row = cur.fetchone()
         return float(row["close"]) if row else None
 
+    # ------------------------------------------------------------ intraday
+
+    @staticmethod
+    def _et_day(on: date):
+        """[start, end) of an ET calendar day, as aware datetimes (intraday_bars.ts is UTC)."""
+        start = datetime.combine(on, time(0), market_spec.TZ)
+        return start, start + timedelta(days=1)
+
+    def get_intraday_bars(self, symbol: str, interval: str, on: date) -> List[Dict[str, Any]]:
+        start, end = self._et_day(on)
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT ts, open, high, low, close, volume, source
+                FROM intraday_bars
+                WHERE symbol = %s AND interval = %s AND ts >= %s AND ts < %s
+                ORDER BY ts
+                """,
+                (symbol, interval, start, end),
+            )
+            return cur.fetchall()
+
+    def latest_intraday_session(self, symbol: str, intervals=("1m", "5m")) -> Optional[date]:
+        """ET date of the newest bar of `symbol` at any of `intervals`."""
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT (max(ts) AT TIME ZONE 'America/New_York')::date AS d FROM intraday_bars"
+                " WHERE symbol = %s AND interval = ANY(%s)",
+                (symbol, list(intervals)),
+            )
+            row = cur.fetchone()
+        return row["d"] if row else None
+
+    def latest_bar(self, symbol: str, on: date) -> Optional[Dict[str, Any]]:
+        """The 1m or 5m bar of `on` that ends last (1m on a tie)."""
+        start, end = self._et_day(on)
+        with self._cursor() as cur:
+            cur.execute(
+                """
+                SELECT ts, interval, close FROM intraday_bars
+                WHERE symbol = %s AND interval IN ('1m', '5m') AND ts >= %s AND ts < %s
+                ORDER BY ts + CASE interval WHEN '1m' THEN interval '1 minute' ELSE interval '5 minutes' END DESC,
+                         interval
+                LIMIT 1
+                """,
+                (symbol, start, end),
+            )
+            return cur.fetchone()
+
+    def resolve_spot(self, on: date) -> Optional[Spot]:
+        """The day's close, or while the session runs (no close stored yet) its latest SPX bar."""
+        close = self.get_spot_price_for_date(on)
+        return pick_spot(on, close, None if close is not None else self.latest_bar(self.symbol, on))
+
     # ------------------------------------------------------------ pricing inputs
 
     def get_rate(self, on: date) -> float:
@@ -115,10 +170,14 @@ class DataProvider:
         return float(row["rate"]) if row else market_spec.FALLBACK_RATE
 
     def get_vix(self, on: date) -> float:
-        """VIX close on or before `on`."""
+        """VIX close on `on`; while that session runs, its latest VIX bar; else the last close before it."""
         with self._cursor() as cur:
-            cur.execute("SELECT close FROM vix_daily WHERE date <= %s ORDER BY date DESC LIMIT 1", (on,))
+            cur.execute("SELECT date, close FROM vix_daily WHERE date <= %s ORDER BY date DESC LIMIT 1", (on,))
             row = cur.fetchone()
+        if row is None or row["date"] != on:
+            bar = self.latest_bar("VIX", on)
+            if bar is not None:
+                return float(bar["close"])
         if not row:
             logger.warning("No VIX data on or before %s; using %.1f", on, DEFAULT_VIX)
             return DEFAULT_VIX
@@ -147,7 +206,7 @@ class DataProvider:
                 return []
             cur.execute(
                 """
-                SELECT strike, option_type, bid, ask, last, open_interest, volume, underlying_price
+                SELECT strike, option_type, bid, ask, last, open_interest, volume, underlying_price, quoted_at
                 FROM option_chain_snapshots
                 WHERE symbol = %s AND snapshot_date = %s AND expiry_date = %s AND source = %s
                 """,
@@ -172,37 +231,39 @@ class DataProvider:
         strike_range: int = 10,
         now: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Option chain for `target_date` (default: latest loaded day).
+        """Option chain for `target_date` (default: the latest session, today once intraday bars arrive).
 
         Uses a collected snapshot of listed quotes when one exists for that day
-        and expiry; otherwise prices the chain with Black-Scholes from the close,
-        VIX and the T-bill rate.
+        and expiry; otherwise prices the chain with Black-Scholes from the spot
+        (the close, or the latest bar while the session runs), VIX and the T-bill rate.
         """
         if target_date is None:
-            spot_data = self.get_latest_spot_price()
-            if not spot_data:
+            latest = self.get_latest_spot_price()
+            target_date = default_session(latest["date"] if latest else None, self.latest_intraday_session(self.symbol))
+            if target_date is None:
                 return None
-            spot, target_date = spot_data["price"], spot_data["date"]
-        else:
-            spot = self.get_spot_price_for_date(target_date)
-            if spot is None:
-                return None
+        spot_quote = self.resolve_spot(target_date)
+        if spot_quote is None:
+            return None
+        spot = spot_quote.price
 
         if expiry_date is None:
             expiry_date = self.default_expiry(target_date, now)
         elif not market_spec.is_expiry(expiry_date):
             raise ValueError(f"{expiry_date} is not a listed {self.symbol} expiry")
 
-        as_of = market_spec.valuation_time(target_date, now or datetime.now(timezone.utc))
-        T = market_spec.year_fraction(as_of, expiry_date)
+        valuation = market_spec.valuation_time(target_date, now or datetime.now(timezone.utc))
+        T = market_spec.year_fraction(valuation, expiry_date)
         if T <= 0:
-            logger.warning("Expiry %s has no time left as of %s", expiry_date, as_of)
+            logger.warning("Expiry %s has no time left as of %s", expiry_date, valuation)
             return None
 
         rate = self.get_rate(target_date)
+        live = {"spot_source": spot_quote.source}
 
         rows = self.get_snapshot_quotes(target_date, expiry_date)
         if rows:
+            as_of = snapshot_as_of(valuation, max((r["quoted_at"] for r in rows if r["quoted_at"]), default=None))
             quotes = [
                 Quote(
                     strike=float(r["strike"]),
@@ -215,9 +276,11 @@ class DataProvider:
                 )
                 for r in rows
             ]
-            chain = build_snapshot_chain(quotes, spot, target_date, expiry_date, T, rate, strike_range)
+            chain = build_snapshot_chain(quotes, spot, target_date, expiry_date,
+                                         market_spec.year_fraction(as_of, expiry_date), rate, strike_range)
             if chain:
-                return chain
+                return {**chain, **live, "as_of": as_of}
             logger.warning("Snapshot for %s/%s unusable; falling back to synthetic", target_date, expiry_date)
 
-        return build_synthetic_chain(spot, target_date, expiry_date, T, rate, self.get_vix(target_date), strike_range)
+        chain = build_synthetic_chain(spot, target_date, expiry_date, T, rate, self.get_vix(target_date), strike_range)
+        return {**chain, **live, "as_of": valuation}

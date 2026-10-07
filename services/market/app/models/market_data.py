@@ -1,7 +1,7 @@
 """Pydantic models for market data endpoints."""
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -101,6 +101,29 @@ class UnderlyingHistoryResponse(BaseModel):
             }
         }
     }
+
+
+class IntradayBar(BaseModel):
+    """One intraday OHLCV bar; `ts` is the bar start (UTC)."""
+
+    ts: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int = Field(..., ge=0)
+    source: str = Field(..., description="'yahoo' (vendor bar) or 'agg_1m' (5m built from 1m bars)")
+
+
+class IntradayResponse(BaseModel):
+    """Intraday bars for one session (ET calendar day)."""
+
+    symbol: Literal["SPX", "VIX"]
+    interval: Literal["1m", "5m", "1h"]
+    date: date
+    count: int = Field(..., ge=0)
+    expected: int = Field(..., ge=0, description="Bars in a complete session (390 1m bars on a normal day, 210 on an early close)")
+    data: List[IntradayBar]
 
 
 class HistoricalDataQuery(BaseModel):

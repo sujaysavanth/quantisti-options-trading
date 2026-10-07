@@ -1,17 +1,20 @@
 """Underlying index (SPX) market data endpoints."""
 
 import logging
-from datetime import date, datetime
-from typing import Optional
+import math
+from datetime import date, datetime, time
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Path
 from fastapi.responses import JSONResponse
 
 from .. import market_spec
-from ..models.market_data import UnderlyingHistoryResponse, UnderlyingSpotResponse
+from ..models.market_data import IntradayBar, IntradayResponse, UnderlyingHistoryResponse, UnderlyingSpotResponse
 from ..services.data_provider import DataProvider
 
 logger = logging.getLogger(__name__)
+
+BAR_MINUTES = {"1m": 1, "5m": 5, "1h": 60}
 
 router = APIRouter(prefix="/underlying", tags=["underlying"])
 data_provider = DataProvider()
@@ -159,6 +162,38 @@ async def get_candles_by_period(
     except Exception as e:
         logger.error(f"Error fetching candles for period {period}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/intraday", response_model=IntradayResponse, summary="Intraday SPX or VIX bars for one session")
+async def get_intraday(
+    symbol: Literal["SPX", "VIX"] = Query("SPX"),
+    interval: Literal["1m", "5m", "1h"] = Query("1m"),
+    date_param: Optional[date] = Query(None, alias="date", description="Session (YYYY-MM-DD). Defaults to the latest one with bars"),
+):
+    """Regular-session bars streamed in by the ingest service (Yahoo, ~15 min delayed during the day).
+
+    How far back each size goes depends on what was collected: 1m about a month, 5m two months, 1h two years.
+    """
+    try:
+        on = date_param or data_provider.latest_intraday_session(symbol, (interval,))
+        if on is None:
+            raise HTTPException(status_code=404, detail=f"No {interval} bars for {symbol} yet. Is the ingest service running?")
+        if not market_spec.is_trading_day(on):
+            raise HTTPException(status_code=404, detail=f"{on} is not an NYSE session")
+        bars = data_provider.get_intraday_bars(symbol, interval, on)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching intraday bars: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    minutes = (market_spec.session_close(on) - datetime.combine(on, time(9, 30), market_spec.TZ)).total_seconds() / 60
+    return IntradayResponse(
+        symbol=symbol, interval=interval, date=on, count=len(bars),
+        expected=math.ceil(minutes / BAR_MINUTES[interval]),
+        data=[IntradayBar(ts=b["ts"], open=float(b["open"]), high=float(b["high"]), low=float(b["low"]),
+                          close=float(b["close"]), volume=int(b["volume"] or 0), source=b["source"]) for b in bars],
+    )
 
 
 @router.get("/vix", summary="CBOE VIX daily closes")

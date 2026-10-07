@@ -92,6 +92,43 @@ def test_snapshot_chain_needs_two_sided_quotes():
     assert build_snapshot_chain(quotes, 7650, date(2026, 9, 30), date(2026, 10, 2), 2 / 365, RATE, 5) is None
 
 
+# ---------------------------------------------------------------- put/call ratio
+
+from app.services.chains import put_call_ratio  # noqa: E402
+
+
+def test_pcr_prefers_open_interest_then_volume():
+    assert put_call_ratio(1000, 1300, 50, 200) == (1.3, "oi")          # CBOE: OI
+    assert put_call_ratio(0, 0, 400, 600) == (1.5, "volume")           # OptionsDX: no OI, has volume
+    assert put_call_ratio(0, 0, 0, 0) == (None, None)
+    assert put_call_ratio(0, 500, 0, 0) == (None, "oi")                 # no calls: undefined ratio, basis still known
+    assert put_call_ratio(1000, 1300, 0, 0, model=True) == (1.3, "model")
+
+
+def _snapshot_with(oi, volume):
+    T = 2 / 365
+    quotes = _quotes_from_model(7686.0, T, 0.14, [7600 + 5 * i for i in range(33)])
+    quotes = [Quote(q.strike, q.option_type, q.bid, q.ask, None, oi(q), volume(q)) for q in quotes]
+    return build_snapshot_chain(quotes, 7686.0, date(2026, 9, 30), date(2026, 10, 2), T, RATE, strike_range=5)
+
+
+def test_snapshot_without_open_interest_uses_volume():
+    chain = _snapshot_with(oi=lambda q: None, volume=lambda q: 30 if q.option_type == "P" else 20)
+    assert (chain["pcr"], chain["pcr_basis"]) == (1.5, "volume")
+    assert chain["total_call_oi"] is None and chain["total_put_oi"] is None   # unknown, not zero
+    assert (chain["total_call_volume"], chain["total_put_volume"]) == (220, 330)
+
+
+def test_snapshot_with_open_interest():
+    chain = _snapshot_with(oi=lambda q: 200 if q.option_type == "P" else 100, volume=lambda q: 5)
+    assert (chain["pcr"], chain["pcr_basis"], chain["total_put_oi"]) == (2.0, "oi", 2200)
+
+
+def test_synthetic_chain_pcr_is_labelled_model():
+    chain = build_synthetic_chain(SPOT, date(2026, 9, 30), date(2026, 10, 2), 2 / 365, RATE, vix=16.0, strike_range=5)
+    assert chain["pcr_basis"] == "model" and chain["pcr"] > 1                # puts carry more made-up OI
+
+
 # ---------------------------------------------------------------- snapshot source choice
 
 from app.services.chains import preferred_snapshot_source  # noqa: E402

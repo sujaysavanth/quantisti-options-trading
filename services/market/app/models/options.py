@@ -1,8 +1,8 @@
 """Pydantic models for options data."""
 
-from datetime import date
+from datetime import date, datetime
 from enum import Enum
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -94,11 +94,19 @@ class OptionChainResponse(BaseModel):
     date: date
     expiry_date: date
     options: List[OptionData]
-    total_call_oi: Optional[int] = Field(None, ge=0, description="Total call open interest")
-    total_put_oi: Optional[int] = Field(None, ge=0, description="Total put open interest")
-    pcr: Optional[float] = Field(None, ge=0, description="Put-Call ratio (OI based)")
+    total_call_oi: Optional[int] = Field(None, ge=0, description="Total call open interest; null when the source doesn't report it")
+    total_put_oi: Optional[int] = Field(None, ge=0, description="Total put open interest; null when the source doesn't report it")
+    total_call_volume: Optional[int] = Field(None, ge=0, description="Total call volume")
+    total_put_volume: Optional[int] = Field(None, ge=0, description="Total put volume")
+    pcr: Optional[float] = Field(None, ge=0, description="Put-call ratio over the listed strikes; see pcr_basis")
+    pcr_basis: Optional[Literal["oi", "volume", "model"]] = Field(
+        None, description="'oi' open interest, 'volume' when the source has no open interest, 'model' for synthetic chains")
     atm_iv: Optional[float] = Field(None, ge=0, description="At-the-money implied volatility")
     source: str = Field("synthetic", description="'snapshot' for collected listed quotes, 'synthetic' for Black-Scholes")
+    as_of: Optional[datetime] = Field(None, description="Moment the chain is priced at: the close, now, or the quote time if earlier")
+    spot_source: Optional[Literal["close", "intraday"]] = Field(
+        None, description="Where the input spot came from: the day's close, or the latest intraday bar while the session runs. "
+                          "Snapshot chains report the spot implied by put-call parity.")
 
     model_config = {
         "json_schema_extra": {

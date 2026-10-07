@@ -94,17 +94,39 @@ def _option(strike: float, option_type: str, expiry: date, spot: float, T: float
     )
 
 
+def put_call_ratio(call_oi: int, put_oi: int, call_vol: int, put_vol: int, model: bool = False):
+    """(pcr, basis). Open interest when the source has any (CBOE); else volume (OptionsDX has none,
+    Yahoo reports 0); 'model' for synthetic chains, whose open interest is made up."""
+    if model:
+        basis, calls, puts = "model", call_oi, put_oi
+    elif call_oi or put_oi:
+        basis, calls, puts = "oi", call_oi, put_oi
+    elif call_vol or put_vol:
+        basis, calls, puts = "volume", call_vol, put_vol
+    else:
+        return None, None
+    return (round(puts / calls, 2) if calls else None), basis
+
+
 def _summary(spot: float, as_of: date, expiry: date, options: List[OptionData], source: str, atm_iv: float) -> Dict[str, Any]:
-    call_oi = sum(o.open_interest or 0 for o in options if o.option_type == OptionType.CALL)
-    put_oi = sum(o.open_interest or 0 for o in options if o.option_type == OptionType.PUT)
+    def total(attr: str, kind: OptionType) -> int:
+        return sum(getattr(o, attr) or 0 for o in options if o.option_type == kind)
+
+    call_oi, put_oi = total("open_interest", OptionType.CALL), total("open_interest", OptionType.PUT)
+    call_vol, put_vol = total("volume", OptionType.CALL), total("volume", OptionType.PUT)
+    pcr, basis = put_call_ratio(call_oi, put_oi, call_vol, put_vol, model=source == "synthetic")
+    has_oi = basis in ("oi", "model")
     return {
         "spot_price": round(spot, 2),
         "date": as_of,
         "expiry_date": expiry,
         "options": options,
-        "total_call_oi": call_oi,
-        "total_put_oi": put_oi,
-        "pcr": round(put_oi / call_oi, 2) if call_oi else None,
+        "total_call_oi": call_oi if has_oi else None,    # None = the source doesn't report it, not zero
+        "total_put_oi": put_oi if has_oi else None,
+        "total_call_volume": call_vol,
+        "total_put_volume": put_vol,
+        "pcr": pcr,
+        "pcr_basis": basis,
         "atm_iv": round(atm_iv, 4),
         "source": source,
     }
