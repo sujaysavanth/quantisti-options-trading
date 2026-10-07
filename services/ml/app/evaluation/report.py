@@ -10,10 +10,8 @@ from typing import Dict, List
 
 import pandas as pd
 
-from .metrics import score
-from .walkforward import forecasts
-
-REGIMES = (("calm (VIX < 15)", 0, 15), ("normal (VIX 15-25)", 15, 25), ("stressed (VIX >= 25)", 25, math.inf))
+from .metrics import REGIMES, score
+from .walkforward import QCOLS, forecasts
 
 
 def summarize(preds: pd.DataFrame, order: List[str]) -> Dict:
@@ -53,46 +51,86 @@ def table(scores: Dict) -> List[str]:
     return lines
 
 
-def to_markdown(summary: Dict) -> str:
+def significance(preds: pd.DataFrame, names: List[str], references: List[str]) -> Dict:
+    """Diebold-Mariano of each forecaster against each reference, on the weeks both have."""
+    from .metrics import pinball_rows
+    from .significance import diebold_mariano
+
+    loss = {}
+    for n in set(names) | set(references):
+        g = preds[preds["forecaster"] == n].dropna(subset=QCOLS)
+        y, q = forecasts(g)
+        loss[n] = pd.Series(pinball_rows(y, q), index=g["anchor_date"].to_numpy())
+    out = {}
+    for n in names:
+        for ref in references:
+            if n == ref or n not in loss or ref not in loss:
+                continue
+            both = loss[n].index.intersection(loss[ref].index)
+            out.setdefault(n, {})[ref] = diebold_mariano(loss[n][both].to_numpy(), loss[ref][both].to_numpy())
+    return out
+
+
+def _p(x):
+    return "-" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.3f}"
+
+
+def to_markdown(summary: Dict, title: str = "Baselines: next-week SPX close, walk-forward", intro: str = "") -> str:
     years = summary["test_years"]
     out = [
-        "# Baselines: next-week SPX close, walk-forward",
+        f"# {title}",
         "",
         f"Generated {summary['generated']}. Test years {years[0]}-{years[-1]}: each year is forecast by a model fitted "
         "only on the years before it. Returns are log returns from one week's last close to the next; widths, "
         "pinball and Winkler are in percent of the index (lower is better). A calibrated forecaster hits the 80% "
         "band about 80% of the time; more means its range is too wide, less means too narrow.",
+        *(["", intro] if intro else []),
         "",
         "## All test weeks",
         "",
         *table(summary["overall"]),
-        "",
-        "## Weeks with a real ATM straddle (2014-2023)",
-        "",
-        "Every forecaster scored on the same weeks, so the option-implied baseline is compared fairly.",
-        "",
-        *table(summary["straddle_weeks"]),
-        "",
-        "## Coverage of the 80% band by VIX regime",
-        "",
-        "Hitting 80% overall can hide a range that is too wide in calm weeks and too narrow in stressed ones.",
-        "",
     ]
-    names = list(summary["overall"])
-    out += ["| regime | weeks | " + " | ".join(names) + " |", "|---|---:|" + "---:|" * len(names)]
-    for regime, scores in summary["by_regime"].items():
-        n = max((s.get("n", 0) for s in scores.values()), default=0)
-        out.append(f"| {regime} | {n} | " + " | ".join(
-            f"{_pct(s.get('coverage_80'), 0)}%" if s.get("n") else "-" for s in scores.values()) + " |")
-    out += ["", "## Pinball loss by year", "", "| year | " + " | ".join(names) + " |", "|---|" + "---:|" * len(names)]
-    for year, scores in summary["by_year"].items():
-        out.append(f"| {year} | " + " | ".join(_pct(s.get("pinball"), 3) if s.get("n") else "-" for s in scores.values()) + " |")
+    if summary.get("straddle_weeks") and any(s.get("n") for s in summary["straddle_weeks"].values()):
+        out += ["", "## Weeks with a real ATM straddle", "",
+                "Every forecaster scored on the same weeks, so the option-implied baseline is compared fairly.", "",
+                *table(summary["straddle_weeks"])]
+    if summary.get("significance"):
+        refs = sorted({r for v in summary["significance"].values() for r in v})
+        out += ["", "## Is it really better? (Diebold-Mariano, one-sided)", "",
+                "Change in pinball loss against each reference (negative = better) and the p-value: the chance of a "
+                "gap this large if the forecaster were really no better. Below 0.05 is the usual bar.", "",
+                "| forecaster | " + " | ".join(f"vs {r}: change | p" for r in refs) + " |",
+                "|---|" + "---:|---:|" * len(refs)]
+        for name, by_ref in summary["significance"].items():
+            cells = []
+            for r in refs:
+                t = by_ref.get(r)
+                cells.append(f"{t['relative'] * 100:+.1f}% | {_p(t['p_value'])}" if t else "- | -")
+            out.append(f"| {name} | " + " | ".join(cells) + " |")
+    regimes = list(summary["by_regime"])
+    out += ["", "## Coverage of the 80% band by VIX regime", "",
+            "Hitting 80% overall can hide a range that is too wide in calm weeks and too narrow in stressed ones.", "",
+            "| forecaster | " + " | ".join(f"{r} ({max(s.get('n', 0) for s in summary['by_regime'][r].values())} wks)"
+                                         for r in regimes) + " |",
+            "|---|" + "---:|" * len(regimes)]
+    for name in summary["overall"]:
+        out.append(f"| {name} | " + " | ".join(
+            f"{_pct(summary['by_regime'][r][name].get('coverage_80'), 0)}%" if summary["by_regime"][r][name].get("n")
+            else "-" for r in regimes) + " |")
+    years_ = list(summary["by_year"])
+    out += ["", "## Pinball loss by year", "", "| forecaster | " + " | ".join(str(y) for y in years_) + " |",
+            "|---|" + "---:|" * len(years_)]
+    for name in summary["overall"]:
+        out.append(f"| {name} | " + " | ".join(
+            _pct(summary["by_year"][y][name].get("pinball"), 3) if summary["by_year"][y][name].get("n") else "-"
+            for y in years_) + " |")
     return "\n".join(out) + "\n"
 
 
-def write(summary: Dict, out_dir: Path, stem: str = "baselines") -> List[Path]:
+def write(summary: Dict, out_dir: Path, stem: str = "baselines", title: str = None, intro: str = "") -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path, md_path = out_dir / f"{stem}.json", out_dir / f"{stem}.md"
     json_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf8")
-    md_path.write_text(to_markdown(summary), encoding="utf8")
+    kwargs = {"title": title} if title else {}
+    md_path.write_text(to_markdown(summary, intro=intro, **kwargs), encoding="utf8")
     return [json_path, md_path]

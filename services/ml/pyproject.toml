@@ -15,6 +15,8 @@ dependencies = [
     "python-dateutil",
     "exchange_calendars>=4.5",
     "arch>=7.0",                 # GARCH baseline (app/evaluation/baselines.py)
+    "scikit-learn>=1.4",         # ridge and gradient-boosted models (app/models/)
+    "interpret-core>=0.6",       # explainable boosting machine (EBM)
 ]
 
 [project.optional-dependencies]

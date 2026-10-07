@@ -28,6 +28,7 @@ import pandas as pd
 
 from ..dataset.options import preferred_source, straddle_sigma_week
 from .metrics import QUANTILES
+from .targets import next_week_variance
 
 TRADING_DAYS = 252
 NORMAL_Z = np.array([NormalDist().inv_cdf(t) for t in QUANTILES])
@@ -107,13 +108,8 @@ class HarRv(SigmaBaseline):
         i = ctx.index_of(rows["anchor_date"])
         return np.column_stack([np.ones(len(i)), ctx.r2_day[i], ctx.r2_week[i], ctx.r2_month[i]])
 
-    @staticmethod
-    def _target(rows, ctx) -> np.ndarray:
-        start, end = ctx.index_of(rows["anchor_date"]) + 1, ctx.index_of(rows["next_anchor_date"]) + 1
-        return np.array([ctx.r2_day[s:e].mean() for s, e in zip(start, end)])
-
     def fit_sigma(self, train, ctx):
-        x, y = self._x(train, ctx), self._target(train, ctx)
+        x, y = self._x(train, ctx), next_week_variance(train, ctx)
         ok = np.isfinite(x).all(axis=1) & np.isfinite(y)
         self.beta, *_ = np.linalg.lstsq(x[ok], y[ok], rcond=None)
 

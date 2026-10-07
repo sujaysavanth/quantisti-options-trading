@@ -46,7 +46,7 @@ The dashboard reads `NEXT_PUBLIC_SIMULATOR_API` (default `http://localhost:8082`
 
 ## Architecture
 
-Ports: gateway 8080, market 8081, simulator 8082, portfolio 8083, stats 8084, ml 8085, explain 8086, market-stream 8090. Streaming stack: ingest **8088** on the host (8087 in the container; `INGEST_HOST_PORT`), Kafka UI 8089, Spark UI 4040, Kafka `localhost:9094` for host tools (`kafka:9092` inside compose). Every service exposes `/health/healthz` and `/health/readyz`, and FastAPI docs at `/docs`.
+Ports: gateway 8080, market 8081, simulator 8082, portfolio 8083, stats 8084, ml 8085, explain 8086, market-stream 8090. Streaming stack: ingest **8088** on the host (8087 in the container; `INGEST_HOST_PORT`), Kafka UI 8089, Spark UI 4040, Kafka `localhost:9094` for host tools (`kafka:9092` inside compose). Every service exposes `/health/healthz` and `/health/readyz` (market-stream only `/health/healthz`), and FastAPI docs at `/docs`.
 
 **Implemented** services (the rest — gateway, portfolio, stats, explain — are health-only stubs):
 

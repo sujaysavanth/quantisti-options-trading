@@ -14,6 +14,7 @@ Forecasts are arrays of shape (n_weeks, len(QUANTILES)) in log-return units, one
 
 from __future__ import annotations
 
+import math
 from typing import Dict
 
 import numpy as np
@@ -21,11 +22,26 @@ import numpy as np
 QUANTILES = (0.05, 0.10, 0.50, 0.90, 0.95)
 I05, I10, I50, I90, I95 = range(5)
 
+# VIX at the anchor (known when forecasting): used to report coverage by regime and to calibrate per regime.
+REGIMES = (("calm (VIX < 15)", 0, 15), ("normal (VIX 15-25)", 15, 25), ("stressed (VIX >= 25)", 25, math.inf))
 
-def pinball(y: np.ndarray, q: np.ndarray, taus=QUANTILES) -> float:
+
+def regime_of(vix: np.ndarray) -> np.ndarray:
+    out = np.empty(len(vix), dtype=object)
+    for label, lo, hi in REGIMES:
+        out[(vix >= lo) & (vix < hi)] = label
+    return out
+
+
+def pinball_rows(y: np.ndarray, q: np.ndarray, taus=QUANTILES) -> np.ndarray:
+    """Pinball loss per week (averaged over the quantiles): the series significance tests compare."""
     diff = y[:, None] - q
     taus = np.asarray(taus)[None, :]
-    return float(np.mean(np.maximum(taus * diff, (taus - 1) * diff)))
+    return np.mean(np.maximum(taus * diff, (taus - 1) * diff), axis=1)
+
+
+def pinball(y: np.ndarray, q: np.ndarray, taus=QUANTILES) -> float:
+    return float(np.mean(pinball_rows(y, q, taus)))
 
 
 def coverage(y: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> float:

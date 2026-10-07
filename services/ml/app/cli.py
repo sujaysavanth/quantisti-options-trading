@@ -4,6 +4,10 @@
     python -m app.cli build-dataset --export ../../data/ml/weekly.csv
     python -m app.cli build-dataset --no-write                     # report only, change nothing
     python -m app.cli evaluate                                     # baselines, walk-forward -> data/ml/reports/
+    python -m app.cli evaluate --models                            # + models, development years 2014-2020 only
+    python -m app.cli ablate --model gbm_sigma                     # which feature groups help (development years)
+    python -m app.cli freeze --model gbm_quantile --groups vix,vix_term --conformal --reason "..."
+    python -m app.cli holdout                                      # the frozen choice on 2021 on, once
 
 From your machine add --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti.
 """
@@ -80,33 +84,101 @@ def default_reports_dir() -> Path:
     return (root if (root / "services").is_dir() else Path.cwd()) / "data" / "ml" / "reports"
 
 
-def training_rows(features, labels):
-    """Weeks with every core feature and a label: what forecasters are fitted and scored on.
-    Option features may be missing (no real chains 2024 .. Sep 2026); models must handle that."""
-    return features.dropna(subset=list(CORE_FEATURES)).merge(labels, on="anchor_date")
+def _load(args):
+    from .forecasting import experiments
+    with psycopg2.connect(args.database_url) as conn:
+        data, ctx = experiments.load(conn)
+    print(f"{len(data)} weeks ({data['anchor_date'].min()} .. {data['anchor_date'].max()}), "
+          f"ATM straddle found for {len(ctx.straddle_sigma)} weeks")
+    return data, ctx
+
+
+def _out(args) -> Path:
+    return Path(args.out) if getattr(args, "out", None) else default_reports_dir()
+
+
+def _print_significance(summary) -> None:
+    for name, by_ref in summary.get("significance", {}).items():
+        cells = "  ".join(f"vs {ref}: {t['relative'] * 100:+.1f}% (p={t['p_value']:.3f})" for ref, t in by_ref.items()
+                          if t.get("n"))
+        print(f"  {name:28} {cells}")
 
 
 def evaluate(args) -> None:
     from .evaluation import report, walkforward
-    from .evaluation.baselines import Context, all_baselines, straddle_sigma
+    from .evaluation.baselines import all_baselines
+    from .forecasting import experiments
 
-    with psycopg2.connect(args.database_url) as conn:
-        features, labels = store.build(conn)
-        daily, _, _ = store.load_market(conn)
-        data = training_rows(features, labels)
-        pairs = list(zip(data["anchor_date"], data["next_anchor_date"]))
-        chains = store.load_anchor_chains(conn, pairs, moneyness=0.01)
-    ctx = Context(daily[["date", "close"]], straddle_sigma(chains))
-    print(f"{len(data)} weeks ({data['anchor_date'].min()} .. {data['anchor_date'].max()}), "
-          f"ATM straddle found for {len(ctx.straddle_sigma)} weeks")
-
-    baselines = all_baselines()
-    last_year = max(a.year for a in data["anchor_date"])
-    preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
-    summary = report.summarize(preds, [b.name for b in baselines])
-    paths = report.write(summary, Path(args.out) if args.out else default_reports_dir())
-    print("\n".join(report.table(summary["overall"])))
+    data, ctx = _load(args)
+    if args.models:
+        groups = args.groups.split(",") if args.groups else None
+        _, summary = experiments.development(data, ctx, groups=groups)
+        stem = "models_dev" + ("_" + "_".join(groups) if groups else "")
+        paths = report.write(summary, _out(args), stem=stem, title="Models vs baselines: development years",
+                             intro=f"Models use feature groups: {', '.join(summary['groups'])}. Best baseline on these "
+                                   f"years: {summary['best_baseline']}. The holdout years (2021 on) are not in this "
+                                   "report; they are scored once, after `freeze`.")
+        print("\n".join(report.table(summary["overall"])))
+        print(f"\nbest baseline: {summary['best_baseline']}; significance (one-sided Diebold-Mariano):")
+        _print_significance(summary)
+    else:
+        baselines = all_baselines()
+        last_year = max(a.year for a in data["anchor_date"])
+        preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
+        summary = report.summarize(preds, [b.name for b in baselines])
+        paths = report.write(summary, _out(args))
+        print("\n".join(report.table(summary["overall"])))
     print("\nwritten: " + ", ".join(str(p) for p in paths))
+
+
+def ablate(args) -> None:
+    import json
+
+    from .forecasting import ablation, experiments
+
+    data, ctx = _load(args)
+    steps = experiments.run_ablation(data, ctx, model=args.model)
+    out = _out(args)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ablation.json").write_text(json.dumps({"model": args.model, "steps": steps}, indent=2, default=str),
+                                       encoding="utf8")
+    print(f"\nkept groups for {args.model}: {', '.join(ablation.chosen_groups(steps))}")
+    print(f"written: {out / 'ablation.json'}")
+
+
+def freeze(args) -> None:
+    from .evaluation import periods
+    from .forecasting import experiments
+
+    choice = {"model": args.model, "groups": args.groups.split(","), "conformal": args.conformal,
+              "reference": args.reference, "reason": args.reason}
+    data, ctx = _load(args)
+    _, dev = experiments.score_choice(data, ctx, choice, periods.DEV_YEARS, args.reference)
+    name = experiments.chosen_name(choice)
+    choice["development"] = {"overall": dev["overall"][name], "significance": dev["significance"].get(name)}
+    record = periods.freeze(choice)
+    print(f"frozen {name} on {', '.join(choice['groups'])} at {record['frozen_at']}: "
+          f"dev pinball {dev['overall'][name]['pinball'] * 100:.3f}, 80% hit {dev['overall'][name]['coverage_80']:.1%}")
+    print(f"written: {periods.CHOICE_FILE}")
+
+
+def holdout(args) -> None:
+    from .evaluation import periods, report
+    from .forecasting import experiments
+
+    choice = periods.holdout_allowed(force=args.force)
+    data, ctx = _load(args)
+    years = periods.holdout_years(max(a.year for a in data["anchor_date"]))
+    print(f"holdout {years.start}-{years.stop - 1}, frozen choice: {experiments.chosen_name(choice)} "
+          f"on {', '.join(choice['groups'])}")
+    _, summary = experiments.score_choice(data, ctx, choice, years, choice.get("reference"))
+    name = experiments.chosen_name(choice)
+    paths = report.write(summary, _out(args), stem="holdout", title="Holdout: the frozen choice, scored once",
+                         intro=f"Frozen choice: {name} on {', '.join(choice['groups'])} (frozen {choice['frozen_at']}).")
+    periods.record_holdout({"overall": summary["overall"], "significance": summary["significance"]})
+    print("\n".join(report.table(summary["overall"])))
+    _print_significance(summary)
+    print("\nwritten: " + ", ".join(str(p) for p in paths) + f", {periods.CHOICE_FILE}")
 
 
 def oi_levels(args) -> None:
@@ -151,11 +223,35 @@ def main(argv=None) -> None:
     p.add_argument("--database-url", default=get_settings().DATABASE_URL)
     p.set_defaults(run=oi_levels)
 
-    p = sub.add_parser("evaluate", help="walk-forward evaluation of the baselines; writes a report")
-    p.add_argument("--database-url", default=get_settings().DATABASE_URL)
-    p.add_argument("--first-test-year", type=int, default=2014)
+    db = {"default": get_settings().DATABASE_URL}
+    p = sub.add_parser("evaluate", help="walk-forward evaluation; writes a report")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--models", action="store_true", help="baselines + models on the development years (2014-2020)")
+    p.add_argument("--groups", help="with --models: feature groups for the models, e.g. vix,options,vix_term")
+    p.add_argument("--first-test-year", type=int, default=2014, help="baselines only: first test year")
     p.add_argument("--out", help="report folder (default: data/ml/reports at the repo root)")
     p.set_defaults(run=evaluate)
+
+    p = sub.add_parser("ablate", help="forward feature-group selection on the development years")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--model", default="gbm_sigma", choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile"])
+    p.add_argument("--out")
+    p.set_defaults(run=ablate)
+
+    p = sub.add_parser("freeze", help="record the development-period choice before the holdout")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--model", required=True, choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile"])
+    p.add_argument("--groups", required=True, help="comma-separated feature groups, e.g. vix,vix_term,options")
+    p.add_argument("--conformal", action="store_true", help="add per-regime conformal calibration")
+    p.add_argument("--reference", default="vix_scaled", help="baseline to beat, e.g. garch+conformal")
+    p.add_argument("--reason", default="", help="one line on why (recorded)")
+    p.set_defaults(run=freeze)
+
+    p = sub.add_parser("holdout", help="score the frozen choice on 2021 onwards, once")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--force", action="store_true", help="run again although it has run (the re-run is recorded)")
+    p.add_argument("--out")
+    p.set_defaults(run=holdout)
     args = parser.parse_args(argv)
     args.run(args)
 

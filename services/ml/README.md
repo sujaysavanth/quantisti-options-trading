@@ -75,6 +75,33 @@ python -m app.cli evaluate --database-url postgresql://quantisti:quantisti@local
 # -> data/ml/reports/baselines.md and .json (git-ignored)
 ```
 
+## Models (`app/forecasting/`)
+
+**Development and holdout.** Every choice (model, settings, feature groups, calibration) is made on the
+development years **2014-2020**. The holdout years **2021 onwards** are scored once, with the choice frozen in
+`services/ml/model_choice.json` (committed). `holdout` refuses a second run unless forced, and a forced re-run is
+recorded next to the first result.
+
+| Model | What it does |
+|---|---|
+| `ridge_sigma` | linear model of log next-week realised variance; missing option features median-filled with a flag |
+| `gbm_sigma` | the same target with gradient-boosted trees |
+| `ebm_sigma` | the same target with an explainable boosting machine (one plottable curve per feature) |
+| `gbm_quantile` | trees predicting each quantile of z = return / VIX sigma directly (how to stretch VIX's range) |
+
+The three volatility models turn sigma into quantiles exactly as the baselines do, with the mapping learned from
+out-of-fold predictions (a flexible model's in-sample sigma is overconfident and would give bands that are too
+narrow). Every forecaster except raw VIX also gets a `+conformal` version: each year's bands are widened or
+narrowed per VIX regime from the out-of-sample misses of earlier years (`conformal.py`). Diebold-Mariano tests
+(`evaluation/significance.py`) say whether a gain over scaled VIX and the best baseline is more than luck.
+
+```bash
+python -m app.cli evaluate --models        # development years: baselines + models (+ conformal) -> models_dev.md
+python -m app.cli ablate --model gbm_sigma # forward feature-group selection on the development years
+python -m app.cli freeze --model gbm_quantile --groups vix,vix_term,support_resistance --conformal --reason "..."
+python -m app.cli holdout                  # the frozen choice on 2021 onwards, once -> holdout.md
+```
+
 ## Setup
 
 ```bash

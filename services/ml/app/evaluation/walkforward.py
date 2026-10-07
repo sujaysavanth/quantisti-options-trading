@@ -10,7 +10,8 @@ of Y's first anchor), so it isn't leakage; `split` asserts it.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+import time
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -31,14 +32,17 @@ def split(data: pd.DataFrame, year: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return train, test
 
 
-def run(data: pd.DataFrame, ctx: Context, forecasters: Iterable, years: Iterable[int]) -> pd.DataFrame:
+def run(data: pd.DataFrame, ctx: Context, forecasters: Iterable, years: Iterable[int],
+        log: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """Long table: one row per (forecaster, test week) with the forecast quantiles and the outcome."""
     frames: List[pd.DataFrame] = []
+    forecasters = list(forecasters)
     for year in years:
         train, test = split(data, year)
         if test.empty:
             continue
         features_only = test.drop(columns=[c for c in LABEL_COLUMNS if c in test.columns])
+        started = time.monotonic()
         for f in forecasters:
             try:
                 f.fit(train, ctx)
@@ -52,6 +56,9 @@ def run(data: pd.DataFrame, ctx: Context, forecasters: Iterable, years: Iterable
             frame["close_ret"] = test["close_ret"].to_numpy()
             frame["vix_close"] = test["vix_close"].to_numpy()
             frames.append(frame)
+        if log:
+            log(f"  {year}: {len(train)} training weeks, {len(test)} test weeks, "
+                f"{len(forecasters)} forecasters in {time.monotonic() - started:.0f}s")
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["forecaster", *QCOLS])
 
 
