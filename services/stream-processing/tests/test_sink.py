@@ -19,6 +19,8 @@ def conn():
     try:
         c = psycopg2.connect(DATABASE_URL, connect_timeout=3)
     except psycopg2.OperationalError:
+        if os.getenv("REQUIRE_POSTGRES"):       # CI sets this: a missing database must fail, not skip
+            raise
         pytest.skip("Postgres not reachable")
     yield c
     c.rollback()

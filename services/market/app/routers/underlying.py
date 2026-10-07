@@ -6,7 +6,6 @@ from datetime import date, datetime, time
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Path
-from fastapi.responses import JSONResponse
 
 from .. import market_spec
 from ..models.market_data import IntradayBar, IntradayResponse, UnderlyingHistoryResponse, UnderlyingSpotResponse

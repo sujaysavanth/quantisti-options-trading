@@ -1,8 +1,8 @@
 """Backtesting engine for option strategies."""
 
 import logging
-from datetime import date, timedelta
-from typing import List, Dict, Any, Optional, Tuple
+from datetime import date
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from psycopg2.extras import RealDictCursor
@@ -10,7 +10,7 @@ from psycopg2.extras import RealDictCursor
 from .. import market_spec
 from ..db.connection import get_db_connection, return_db_connection
 from ..services.market_client import MarketDataClient
-from ..models.backtest import EntryLogic, ExitLogic, TradeStatus
+from ..models.backtest import EntryLogic, ExitLogic
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -65,8 +65,7 @@ class BacktestEngine:
 
             logger.info(f"Running backtest {backtest_id} with {len(trade_dates)} trades")
 
-            # Execute trades
-            capital = float(backtest['initial_capital'])
+            # Execute trades. Capital isn't tracked per trade: metrics_calculator works from initial_capital.
             trade_number = 1
 
             for entry_date in trade_dates:
@@ -359,7 +358,6 @@ class BacktestEngine:
         max_holding_days: Optional[int]
     ) -> Dict[str, Any]:
         """Simulate trade exit based on exit logic."""
-        current_date = entry_date + timedelta(days=1)
         exit_date = None
         exit_reason = None
 
@@ -368,7 +366,8 @@ class BacktestEngine:
         nearest_expiry = min(leg['expiry_date'] for leg in trade_legs)
 
         # For simplicity, exit on nearest expiry
-        # TODO: Implement daily checks for stop loss, target, max days
+        # TODO: Implement daily checks for stop loss, target, max days. Until then stop_loss_pct,
+        # target_pct and max_holding_days are stored with the backtest but have no effect.
         if exit_logic == ExitLogic.ON_EXPIRY.value or True:  # Default to expiry for now
             exit_date = nearest_expiry
             exit_reason = "EXPIRY"

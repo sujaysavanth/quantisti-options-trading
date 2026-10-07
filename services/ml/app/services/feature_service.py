@@ -1,11 +1,10 @@
 """Feature computation and storage service."""
 
 import logging
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
 import pandas as pd
 from psycopg2.extras import RealDictCursor
-import json
 
 from ..db.connection import get_db_connection, return_db_connection
 from ..calculators.price_calculator import PriceFeatureCalculator

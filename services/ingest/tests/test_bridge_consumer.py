@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from app.bridge.consumer import Bridge, should_post, start_offset
 from app.bridge.state import BridgeState

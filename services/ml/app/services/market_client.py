@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Dict, Optional
-from datetime import datetime, date, timedelta
+from datetime import date, timedelta
 import httpx
 
 from ..config import get_settings

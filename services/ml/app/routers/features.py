@@ -2,14 +2,11 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
 from ..models.features import (
     FeatureComputeRequest,
-    FeatureResponse,
-    FeatureListResponse,
-    WeeklyFeatures
+    FeatureResponse
 )
 from ..services.feature_service import FeatureService
 

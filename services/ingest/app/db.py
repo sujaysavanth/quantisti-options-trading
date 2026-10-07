@@ -7,7 +7,10 @@ than a pool and never holds a connection between scans.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from typing import TYPE_CHECKING, Iterator, Optional
+
+if TYPE_CHECKING:
+    import psycopg2.extensions
 
 
 @contextmanager

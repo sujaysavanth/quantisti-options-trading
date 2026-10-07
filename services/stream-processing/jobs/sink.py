@@ -10,7 +10,7 @@ per micro-batch so a batch lands completely or not at all.
 
 import csv
 import io
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Iterable, Optional, Sequence
 
 from psycopg2.extras import execute_values

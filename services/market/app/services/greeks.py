@@ -1,7 +1,6 @@
 """Options Greeks calculator."""
 
 import math
-from typing import Dict
 
 from scipy.stats import norm
 
