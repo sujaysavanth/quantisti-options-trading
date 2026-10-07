@@ -1,6 +1,6 @@
 """Pure DataFrame transforms: Kafka rows in, table-shaped rows out. No I/O, so they test on a local SparkSession."""
 
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Union
 
 from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
@@ -90,13 +90,14 @@ def five_minute_bars(one_minute: DataFrame) -> DataFrame:
     )
 
 
-def latest(df: DataFrame, keys: Sequence[str], order_col: str) -> DataFrame:
-    """One row per key: the one with the greatest `order_col`.
+def latest(df: DataFrame, keys: Sequence[str], order_col: Union[str, Sequence[str]]) -> DataFrame:
+    """One row per key: the one with the greatest `order_col` (or columns, compared in order).
 
     Needed before an upsert: Postgres refuses an INSERT ... ON CONFLICT that hits the same
     row twice in one statement, and one micro-batch can hold several polls of the same contract.
     """
-    w = Window.partitionBy(*keys).orderBy(F.col(order_col).desc())
+    cols = [order_col] if isinstance(order_col, str) else list(order_col)
+    w = Window.partitionBy(*keys).orderBy(*[F.col(c).desc() for c in cols])
     return df.withColumn("_rank", F.row_number().over(w)).where("_rank = 1").drop("_rank")
 
 
@@ -142,7 +143,15 @@ def chain_rows(valid: DataFrame) -> DataFrame:
         F.col("symbol").isNotNull() & F.col("snapshot_date").isNotNull() & F.col("expiry_date").isNotNull()
         & F.col("quoted_at").isNotNull() & F.col("option_type").isin("C", "P") & (F.col("strike") > 0)
     )
-    return latest(good, CONTRACT_KEY, "quoted_at").select(
+    # Same rule as the upsert in sink.py: the quote comes from the newest *two-sided* capture when there
+    # is one, while open interest and volume come from the newest capture of all.
+    newest = Window.partitionBy(*CONTRACT_KEY).orderBy(F.col("quoted_at").desc())
+    two_sided = F.coalesce((F.col("bid") > 0) & (F.col("ask") >= F.col("bid")), F.lit(False))
+    ranked = (good
+              .withColumn("open_interest", F.first("open_interest").over(newest))
+              .withColumn("volume", F.first("volume").over(newest))
+              .withColumn("_two_sided", two_sided.cast("int")))
+    return latest(ranked, CONTRACT_KEY, ["_two_sided", "quoted_at"]).select(
         "symbol", "snapshot_date", "expiry_date", "strike", "option_type", "underlying_price",
         "bid", "ask", "last", "open_interest", "volume", "vendor_iv", "vendor_delta", "quoted_at", "source",
     )

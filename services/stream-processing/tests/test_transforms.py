@@ -4,15 +4,16 @@ from jobs.schemas import CHAIN_PAYLOAD, DAILY_PAYLOAD
 from jobs.transforms import chain_rows, daily_frames, parse_envelopes
 
 
-def chain_msg(expiry="2026-10-09", quoted_at="2026-10-05T20:14:59Z", bid=40.5, strikes=(7770.0, 7775.0)):
+def chain_msg(expiry="2026-10-09", quoted_at="2026-10-05T20:14:59Z", bid=40.5, strikes=(7770.0, 7775.0),
+              volume=10, open_interest=None):
     return {
         "schema": "chain.v1", "source": "cboe", "delay_minutes": 15, "produced_at": "2026-10-06T05:06:02.878955Z",
         "payload": {
             "symbol": "SPX", "expiry": expiry, "session_date": "2026-10-05", "quoted_at": quoted_at,
             "underlying_price": 7773.95,
             "quotes": [
-                {"option_type": t, "strike": k, "bid": bid, "ask": bid + 0.4, "last": None, "volume": 10,
-                 "open_interest": None, "vendor_iv": 0.11, "vendor_delta": 0.5}
+                {"option_type": t, "strike": k, "bid": bid, "ask": None if bid is None else bid + 0.4, "last": None,
+                 "volume": volume, "open_interest": open_interest, "vendor_iv": 0.11, "vendor_delta": 0.5}
                 for k in strikes for t in ("C", "P")
             ],
         },
@@ -52,6 +53,21 @@ def test_newest_quote_per_contract_wins_within_a_batch(kafka_df):
     valid, _ = parse_envelopes(kafka_df(newer, older), CHAIN_PAYLOAD, "chain.v1")
     rows = chain_rows(valid).collect()
     assert len(rows) == 4 and {r.bid for r in rows} == {40.5}
+
+
+def test_quote_less_capture_keeps_the_earlier_quote_within_a_batch(kafka_df):
+    good = chain_msg(quoted_at="2026-10-05T19:43:00Z", bid=40.5, volume=900, open_interest=1200)
+    empty = chain_msg(quoted_at="2026-10-05T20:14:59Z", bid=None, volume=1500, open_interest=1250)
+    valid, _ = parse_envelopes(kafka_df(empty, good), CHAIN_PAYLOAD, "chain.v1")
+    rows = chain_rows(valid).collect()
+    assert len(rows) == 4
+    assert {(r.bid, r.quoted_at) for r in rows} == {(40.5, datetime(2026, 10, 5, 19, 43))}   # the real quote
+    assert {(r.volume, r.open_interest) for r in rows} == {(1500, 1250)}                    # newest OI/volume
+
+
+def test_only_quote_less_captures_still_give_a_row(kafka_df):
+    valid, _ = parse_envelopes(kafka_df(chain_msg(bid=None)), CHAIN_PAYLOAD, "chain.v1")
+    assert [r.bid for r in chain_rows(valid).collect()] == [None] * 4
 
 
 def test_bad_contracts_are_dropped(kafka_df):

@@ -15,32 +15,40 @@ from typing import Iterable, Optional, Sequence
 
 from psycopg2.extras import execute_values
 
-UPSERT_CHAIN = """
-    INSERT INTO option_chain_snapshots (
-        symbol, snapshot_date, expiry_date, strike, option_type, underlying_price,
-        bid, ask, last, open_interest, volume, vendor_iv, vendor_delta, quoted_at, source)
-    VALUES %s
-    ON CONFLICT (symbol, snapshot_date, expiry_date, strike, option_type, source) DO UPDATE SET
-        underlying_price = EXCLUDED.underlying_price, bid = EXCLUDED.bid, ask = EXCLUDED.ask,
-        last = EXCLUDED.last, open_interest = EXCLUDED.open_interest, volume = EXCLUDED.volume,
-        vendor_iv = EXCLUDED.vendor_iv, vendor_delta = EXCLUDED.vendor_delta, quoted_at = EXCLUDED.quoted_at
-    -- newest quote wins; a replayed or late older capture never overwrites a newer one
-    WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at
-"""
-
 CHAIN_COLUMNS = ("symbol, snapshot_date, expiry_date, strike, option_type, underlying_price, bid, ask, last, "
                  "open_interest, volume, vendor_iv, vendor_delta, quoted_at, source")
+
+# Conflict rule for a contract already stored that session:
+# - a capture older than the stored quote (a replayed batch, a late message) changes nothing;
+# - open interest and volume take the newer values. (When a quote-less capture was kept out, quoted_at still
+#   holds the older quote's time, so a replay of a quote-less capture in between can set them back slightly.)
+# - the quote itself (bid/ask/last, vendor IV/delta, the spot it was taken against, and quoted_at, which
+#   says when it was taken) is only replaced by a two-sided quote, or when the stored one isn't two-sided
+#   either. CBOE sometimes publishes a capture with no bid/ask at all (2026-10-05 16:14 ET); without this,
+#   that capture wiped out the day's real quotes.
+_TWO_SIDED = "COALESCE({t}.bid > 0 AND {t}.ask >= {t}.bid, false)"
+_REPLACE_QUOTE = f"({_TWO_SIDED.format(t='EXCLUDED')} OR NOT {_TWO_SIDED.format(t='option_chain_snapshots')})"
+_QUOTE_COLUMNS = ("underlying_price", "bid", "ask", "last", "vendor_iv", "vendor_delta", "quoted_at")
+_CHAIN_CONFLICT = (
+    "ON CONFLICT (symbol, snapshot_date, expiry_date, strike, option_type, source) DO UPDATE SET\n        "
+    + ",\n        ".join(
+        [f"{c} = CASE WHEN {_REPLACE_QUOTE} THEN EXCLUDED.{c} ELSE option_chain_snapshots.{c} END" for c in _QUOTE_COLUMNS]
+        + ["open_interest = EXCLUDED.open_interest", "volume = EXCLUDED.volume"])
+    + "\n    WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at"
+)
+
+UPSERT_CHAIN = f"""
+    INSERT INTO option_chain_snapshots ({CHAIN_COLUMNS})
+    VALUES %s
+    {_CHAIN_CONFLICT}
+"""
 
 # Bulk version of UPSERT_CHAIN for historical imports: COPY into a temp table (far faster than
 # INSERT ... VALUES for millions of rows), then one INSERT ... SELECT with the same conflict rule.
 COPY_UPSERT_CHAIN = f"""
     INSERT INTO option_chain_snapshots ({CHAIN_COLUMNS})
     SELECT {CHAIN_COLUMNS} FROM chain_stage
-    ON CONFLICT (symbol, snapshot_date, expiry_date, strike, option_type, source) DO UPDATE SET
-        underlying_price = EXCLUDED.underlying_price, bid = EXCLUDED.bid, ask = EXCLUDED.ask,
-        last = EXCLUDED.last, open_interest = EXCLUDED.open_interest, volume = EXCLUDED.volume,
-        vendor_iv = EXCLUDED.vendor_iv, vendor_delta = EXCLUDED.vendor_delta, quoted_at = EXCLUDED.quoted_at
-    WHERE option_chain_snapshots.quoted_at IS NULL OR EXCLUDED.quoted_at >= option_chain_snapshots.quoted_at
+    {_CHAIN_CONFLICT}
 """
 
 UPSERT_BARS = """

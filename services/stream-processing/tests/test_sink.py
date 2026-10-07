@@ -25,14 +25,38 @@ def conn():
     c.close()
 
 
-def chain_row(bid, quoted_at=QUOTED, strike=7775.0):
-    return ("SPX", DAY, date(2099, 1, 9), strike, "C", 7773.95, bid, bid + 0.4, None, 100, 5, 0.11, 0.5, quoted_at, "test")
+def chain_row(bid, quoted_at=QUOTED, strike=7775.0, oi=100, volume=5):
+    ask = None if bid is None else bid + 0.4
+    return ("SPX", DAY, date(2099, 1, 9), strike, "C", 7773.95, bid, ask, None, oi, volume, 0.11, 0.5, quoted_at, "test")
 
 
 def snapshot(conn):
     with conn.cursor() as cur:
         cur.execute("SELECT strike, bid, quoted_at FROM option_chain_snapshots WHERE source = 'test' ORDER BY strike")
         return cur.fetchall()
+
+
+def quote_and_counts(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT bid, ask, quoted_at, open_interest, volume FROM option_chain_snapshots WHERE source = 'test'")
+        bid, ask, quoted_at, oi, volume = cur.fetchone()
+        return (float(bid) if bid is not None else None, float(ask) if ask is not None else None,
+                quoted_at.replace(tzinfo=None), oi, volume)
+
+
+@pytest.mark.parametrize("write", [write_chain, copy_chain])
+def test_quote_less_capture_keeps_the_quote_but_updates_counts(conn, write):
+    write(conn, [chain_row(40.5, oi=1200, volume=900)])
+    write(conn, [chain_row(None, quoted_at=QUOTED + timedelta(minutes=30), oi=1250, volume=1500)])  # CBOE's empty capture
+    assert quote_and_counts(conn) == (40.5, 40.9, QUOTED, 1250, 1500)
+    write(conn, [chain_row(41.0, quoted_at=QUOTED + timedelta(minutes=40), oi=1260, volume=1600)])  # a real quote again
+    assert quote_and_counts(conn) == (41.0, 41.4, QUOTED + timedelta(minutes=40), 1260, 1600)
+
+
+def test_quote_less_capture_replaces_a_quote_less_one(conn):
+    write_chain(conn, [chain_row(None, oi=10)])
+    write_chain(conn, [chain_row(None, quoted_at=QUOTED + timedelta(minutes=5), oi=20)])
+    assert quote_and_counts(conn) == (None, None, QUOTED + timedelta(minutes=5), 20, 5)
 
 
 def test_chain_upsert_is_idempotent(conn):
