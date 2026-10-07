@@ -11,12 +11,13 @@ from ..dependencies import get_market_stream_client, get_paper_store
 from ..models.paper import PaperLegInput, PaperLegState, PaperTradeCreate, PaperTradeResponse
 from ..services.market_stream_client import MarketStreamClient
 from ..services.paper_store import PaperTradeStore, StoredLeg, StoredTrade
+from ..services.quote_pricing import leg_price
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/paper", tags=["paper-trading"])
 
 settings = get_settings()
-LOT_SIZE = settings.NIFTY_LOT_SIZE
+MULTIPLIER = settings.CONTRACT_MULTIPLIER
 
 
 def _match_quote_leg(quote: dict, leg: PaperLegInput | StoredLeg):
@@ -43,11 +44,8 @@ def _match_quote_leg(quote: dict, leg: PaperLegInput | StoredLeg):
 
 
 def _price_from_quote(q_leg: dict) -> float:
-    for key in ("last", "bid", "ask"):
-        value = q_leg.get(key)
-        if value not in (None, 0):
-            return float(value)
-    return 0.0
+    # Enter and mark at the bid/ask mid; the last trade is only a fallback.
+    return leg_price(q_leg)
 
 
 def build_response(trade: StoredTrade, quote: dict) -> PaperTradeResponse:
@@ -62,9 +60,9 @@ def build_response(trade: StoredTrade, quote: dict) -> PaperTradeResponse:
         current_price = _price_from_quote(quote_leg) if quote_leg else None
         entry_price = leg.entry_price or 0.0
         side_mult = 1 if leg.side == "BUY" else -1
-        entry_value = entry_price * leg.quantity * LOT_SIZE * side_mult
+        entry_value = entry_price * leg.quantity * MULTIPLIER * side_mult
         current_value = (
-            (current_price or 0.0) * leg.quantity * LOT_SIZE * side_mult
+            (current_price or 0.0) * leg.quantity * MULTIPLIER * side_mult
             if current_price is not None
             else entry_value
         )

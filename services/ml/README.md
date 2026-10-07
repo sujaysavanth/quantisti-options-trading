@@ -1,122 +1,136 @@
-# ML Features Service
+# ML service
 
-Machine learning and feature engineering service for the Quantisti options trading platform.
+Builds the weekly dataset for the SPX range forecast, and (in later modules) serves the forecast itself.
+The plan: predict where SPX closes at next week's expiry as a range (quantiles), and only ship a model that
+beats the range VIX implies.
 
-## Purpose
+## Weekly dataset (`app/dataset/`)
 
-- **Feature Engineering**: Compute and store technical features from market data
-- **ML Models**: Host predictive models for strategy recommendations (planned)
-- **Training Data**: Generate labeled datasets from backtest results
+One row per week, anchored on the week's **last session** (Friday, or Thursday before a holiday). That is also
+the week's SPX expiry.
 
-## Architecture
+- **Features** (`features.py`) use data up to and including the anchor's close, nothing later. `build_features`
+  is pure and vectorised: daily SPX/VIX/rates in, every week out. The same function builds history and the
+  latest week, so training and serving can't drift.
+- **Labels** (`labels.py`) are what happened next week: the expiry close as a log return (`close_ret`, the
+  forecast target) and the high/low excursions. A week whose next week is incomplete or missing a session gets
+  no label.
+- **No lookahead** is tested: rebuilding from data cut off at an anchor gives the same features, and changing
+  future prices changes nothing in the past (`tests/test_dataset.py`).
 
+Model features (feature version 2), in groups (`FEATURE_GROUPS`) so ML-3 can add one group at a time and keep it
+only if the walk-forward score improves:
+
+| Group | Features | Source |
+|---|---|---|
+| `price` | `ret_1w`, `ret_4w` (log), `range_1w` (week high - low, / close) | SPX daily |
+| `realised_vol` | `rv_5d`, `rv_20d`, `rv_60d` (annualised, decimal) | SPX daily |
+| `vix` | `vix_close`, `vix_change_1w`, `vix_hv_spread` (VIX - 20d realised vol), `vix_pct_1y` | VIX |
+| `vix_term` | `vix9d`, `vix9d_ratio` (VIX9D/VIX), `vix_term` (VIX/VIX3M; > 1 = inverted), `vvix` | `index_daily` (CBOE) |
+| `tail` | `skew_index` (CBOE SKEW) | `index_daily` |
+| `credit_macro` | `baa10y`, `baa10y_chg_4w`, `t10y2y`, `rate_3m` (all taken before the anchor: FRED posts a day late) | `index_daily`, `rates_daily` |
+| `technical` | `rsi_14`, `bb_width`, `atr_pct`, `dist_ma50`, `volume_ratio` | SPX daily |
+| `support_resistance` | `dist_high_20d`, `dist_low_20d`, `drawdown_52w`, `dist_low_52w` | SPX daily |
+| `calendar` | `sessions_next` (4 in holiday weeks) | NYSE calendar |
+| `options` | `atm_iv_1w` (next week's ATM straddle, annualised), `skew_25d` (25-delta put IV - call IV), `pc_volume_ratio` | the anchor's chain for next week's expiry (`options.py`) |
+
+`CORE_FEATURES` (every group but `options`) exist for every week from 2011-01-07 (once VIX9D has history).
+The option features exist where real chains do: OptionsDX 2010-2023 (98% of weeks) and CBOE from October 2026;
+**not 2024 to September 2026**, so models must handle them missing. An event calendar (Fed meetings, CPI and jobs
+reports in the coming week) is planned for the next sprint.
+
+**Open-interest levels** (`oi_levels.py`, table `weekly_oi_levels`) are recorded every week from live CBOE chains
+but are not a model feature yet: OptionsDX has no open interest, so there is no history to train on. Put wall,
+call wall, max pain and a naive dealer gamma exposure (GEX) for next week's expiry; after about a year they can
+be tested. `python -m app.cli oi-levels --date 2026-10-06` shows them for any collected day.
+
+`weekly_features` also keeps its original columns (RSI, MACD, Bollinger width, ATR and historical vol in their
+original definitions). `weekly_change_pct` and `weekly_high_low_range_pct` used to be measured over the whole
+60-day fetch window; they now cover the week.
+
+The first year (2010) is warm-up: the 52-week drawdown and VIX percentile need a year of history, so complete
+rows start 2010-12-31 (about 820 weeks to 2026).
+
+## Baselines and evaluation (`app/evaluation/`)
+
+Every forecaster outputs the 5%/10%/50%/90%/95% quantiles of next week's close return and is scored
+walk-forward: each test year (2014 onwards) is forecast by a model fitted only on the years before it.
+`predict` never receives the test weeks' label columns.
+
+| Baseline | Volatility forecast |
+|---|---|
+| `vix_raw` | VIX as published, normal quantiles, no fitting: the market's own number |
+| `vix_scaled` | the same VIX sigma, with per-quantile multipliers learned from past years (absorbs bias and skew) |
+| `rv_20d` | 20-day realised volatility |
+| `har_rv` | HAR-RV (Corsi 2009): next week's variance from last day / week / month of squared returns |
+| `garch` | GARCH(1,1) on daily returns (`arch`), summed over next week's sessions |
+| `straddle` | next-week ATM straddle from real OptionsDX chains (2010-2023 only) |
+
+All but `vix_raw` turn sigma into quantiles the same way (empirical quantiles of return / sigma over the
+training years), so they differ only in how well they track volatility. Metrics (`metrics.py`): coverage of the
+80%/90% bands, band width, pinball loss, Winkler interval score, and 80% coverage by VIX regime.
+
+```bash
+python -m app.cli evaluate --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti
+# -> data/ml/reports/baselines.md and .json (git-ignored)
 ```
-Market Service → Feature Calculators → Feature Store (PostgreSQL) → ML Models
-                                              ↓
-                                    Strategy Simulator (labels)
+
+## Models (`app/forecasting/`)
+
+**Development and holdout.** Every choice (model, settings, feature groups, calibration) is made on the
+development years **2014-2020**. The holdout years **2021 onwards** are scored once, with the choice frozen in
+`services/ml/model_choice.json` (committed). `holdout` refuses a second run unless forced, and a forced re-run is
+recorded next to the first result.
+
+| Model | What it does |
+|---|---|
+| `ridge_sigma` | linear model of log next-week realised variance; missing option features median-filled with a flag |
+| `gbm_sigma` | the same target with gradient-boosted trees |
+| `ebm_sigma` | the same target with an explainable boosting machine (one plottable curve per feature) |
+| `gbm_quantile` | trees predicting each quantile of z = return / VIX sigma directly (how to stretch VIX's range) |
+
+The three volatility models turn sigma into quantiles exactly as the baselines do, with the mapping learned from
+out-of-fold predictions (a flexible model's in-sample sigma is overconfident and would give bands that are too
+narrow). Every forecaster except raw VIX also gets a `+conformal` version: each year's bands are widened or
+narrowed per VIX regime from the out-of-sample misses of earlier years (`conformal.py`). Diebold-Mariano tests
+(`evaluation/significance.py`) say whether a gain over scaled VIX and the best baseline is more than luck.
+
+```bash
+python -m app.cli evaluate --models        # development years: baselines + models (+ conformal) -> models_dev.md
+python -m app.cli ablate --model gbm_sigma # forward feature-group selection on the development years
+python -m app.cli freeze --model gbm_quantile --groups vix,vix_term,support_resistance --conformal --reason "..."
+python -m app.cli holdout                  # the frozen choice on 2021 onwards, once -> holdout.md
 ```
-
-## Features Computed
-
-### Price Features
-- Weekly percentage change
-- High-low range percentage
-- Volume ratio vs average
-
-### Technical Indicators
-- RSI (14-period)
-- MACD & Signal line
-- Bollinger Bands width
-
-### Volatility Features
-- Historical volatility (10-day, 20-day)
-- ATR (Average True Range)
-
-## API Endpoints
-
-### Feature Management
-- `POST /v1/features/compute` - Compute features for a specific week
-- `GET /v1/features/weekly/{symbol}/{date}` - Get features for a specific week
-- `GET /v1/features/latest/{symbol}` - Get latest features (TODO)
-- `POST /v1/features/backfill` - Backfill historical features (TODO)
-
-### Health
-- `GET /health/healthz` - Health check
-- `GET /health/ready` - Readiness check
-
-## Database Schema
-
-### `weekly_features`
-Stores computed features for each week:
-- Price features
-- Technical indicators
-- Volatility metrics
-
-### `weekly_strategy_performance`
-Stores strategy performance by week (for ML training labels):
-- Performance metrics
-- Best strategy flag
 
 ## Setup
 
-### Database Migration
-
-Run the migration to create required tables:
-
 ```bash
-psql -U quantisti -d quantisti -f services/ml/migrations/001_create_weekly_features_table.sql
+# Tables (not applied by scripts/db_apply.sh), in order:
+docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/001_create_weekly_features_table.sql
+docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/002_add_vix_features.sql
+docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/003_weekly_dataset.sql   # safe to re-run
+docker compose exec -T postgres psql -U quantisti -d quantisti < services/ml/migrations/004_more_features.sql    # safe to re-run
+# The index features need index_daily filled (schema/sql/011 + ingest `backfill-daily --indexes`).
+
+# Build every week (about a second), store it, print a report:
+cd services/ml && pip install -e ".[test]"
+python -m app.cli build-dataset --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti \
+  --export ../../data/ml/weekly.csv
 ```
 
-### Running the Service
+## API (port 8085)
+
+| Endpoint | |
+|---|---|
+| `POST /v1/features/backfill?symbol=SPX` | rebuild all weeks and labels, return a summary |
+| `POST /v1/features/compute` | the week containing `week_start_date` (rebuilds if it isn't stored, or with `force_recompute`) |
+| `GET /v1/features/weekly/SPX/{any day}` | the stored week containing that day |
+| `GET /v1/features/latest/SPX` | the latest complete week |
+
+Only SPX is supported. `/health/healthz`, `/health/readyz`, docs at `/docs`.
+
+## Tests
 
 ```bash
-# With Docker Compose
-docker compose up ml
-
-# Access at http://localhost:8085
+cd services/ml && pip install -e ".[test]" && pytest -q
 ```
-
-## Development Status
-
-### ✅ Completed
-- Service skeleton and structure
-- Database connection management
-- Feature calculator modules (price, technical, volatility)
-- API endpoint structure
-- Database schema design
-
-### 🚧 In Progress
-- Market data integration (needs market service API implementation)
-- Feature persistence (needs database schema deployment)
-- Feature retrieval endpoints
-
-### 📋 TODO
-- Implement market data fetching from market service
-- Complete database save/load operations
-- Implement backfill functionality for historical data
-- Add ML model training pipeline
-- Add prediction endpoints
-- Add feature validation and quality checks
-
-## Next Steps
-
-1. **Deploy Database Schema**: Run the migration to create tables
-2. **Integrate Market Service**: Update `market_client.py` with actual market service endpoints
-3. **Test Feature Computation**: Compute features for sample weeks
-4. **Backfill Historical Data**: Generate training dataset (2-3 years)
-5. **Train Initial Model**: Build first prediction model
-6. **Deploy Model**: Add prediction endpoints
-
-## Configuration
-
-Environment variables:
-- `DATABASE_URL`: PostgreSQL connection string
-- `MARKET_SERVICE_URL`: Market data service URL
-- `ENV`: Environment (development/production)
-
-## Dependencies
-
-- FastAPI: Web framework
-- pandas/numpy: Data processing
-- psycopg2: PostgreSQL client
-- httpx: HTTP client for market service

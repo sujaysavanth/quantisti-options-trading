@@ -55,14 +55,14 @@ export interface DashboardData {
 }
 
 export const dashboardMock: DashboardData = {
-  weekOf: '18 Nov 2025',
-  expiry: '25 Nov 2025 (Tuesday)',
+  weekOf: '28 Sep 2026',
+  expiry: '02 Oct 2026 (Friday)',
   predictedRange: {
-    lower: 19520,
-    upper: 20080,
+    lower: 7540,
+    upper: 7760,
     confidence: 82
   },
-  closingPriceEstimate: 19810,
+  closingPriceEstimate: 7655,
   context: {
     vix: 13.2,
     oiPcr: 1.11,
@@ -72,77 +72,77 @@ export const dashboardMock: DashboardData = {
     {
       name: 'Balanced Iron Condor',
       type: 'Neutral Income',
-      strikes: '19500 / 20100',
-      expectedPl: 14800,
-      maxLoss: 22000,
+      strikes: '7535 / 7765',
+      expectedPl: 7620,
+      maxLoss: 11330,
       winProbability: 0.68,
       riskReward: 1.9,
-      margin: 265000,
+      margin: 136520,
     score: 91,
     payoffPoints: [
-      { price: 19200, pl: -42000 },
-      { price: 19500, pl: 2000 },
-      { price: 19800, pl: 16500 },
-      { price: 20000, pl: 14800 },
-      { price: 20350, pl: -32000 }
+      { price: 7420, pl: -21640 },
+      { price: 7535, pl: 1030 },
+      { price: 7650, pl: 8500 },
+      { price: 7725, pl: 7620 },
+      { price: 7860, pl: -16480 }
     ],
     legs: [
       {
         action: 'SELL',
         optionType: 'CALL',
-        strike: 20100,
-        expiry: '25 Nov 2025',
-        premium: 145,
-        projectedPl: 6000,
-        marginImpact: 85000,
+        strike: 7765,
+        expiry: '02 Oct 2026',
+        premium: 56.0,
+        projectedPl: 3090,
+        marginImpact: 43790,
         payoffPoints: [
-          { price: 19500, pl: 8000 },
-          { price: 19800, pl: 6000 },
-          { price: 20100, pl: 2000 },
-          { price: 20400, pl: -6000 }
+          { price: 7535, pl: 4120 },
+          { price: 7650, pl: 3090 },
+          { price: 7765, pl: 1030 },
+          { price: 7880, pl: -3090 }
         ]
       },
       {
         action: 'BUY',
         optionType: 'CALL',
-        strike: 20300,
-        expiry: '25 Nov 2025',
-        premium: 90,
-        projectedPl: -3000,
-        marginImpact: -45000,
+        strike: 7845,
+        expiry: '02 Oct 2026',
+        premium: 34.8,
+        projectedPl: -1550,
+        marginImpact: -23180,
         payoffPoints: [
-          { price: 19500, pl: -2000 },
-          { price: 19800, pl: -1500 },
-          { price: 20300, pl: 0 },
-          { price: 20600, pl: 2800 }
+          { price: 7535, pl: -1030 },
+          { price: 7650, pl: -770 },
+          { price: 7845, pl: 0 },
+          { price: 7960, pl: 1440 }
         ]
       },
       {
         action: 'SELL',
         optionType: 'PUT',
-        strike: 19500,
-        expiry: '25 Nov 2025',
-        premium: 165,
-        projectedPl: 9000,
-        marginImpact: 90000,
+        strike: 7535,
+        expiry: '02 Oct 2026',
+        premium: 63.8,
+        projectedPl: 4640,
+        marginImpact: 46360,
         payoffPoints: [
-          { price: 19200, pl: -16000 },
-          { price: 19500, pl: 2000 },
-          { price: 19800, pl: 6000 }
+          { price: 7420, pl: -8240 },
+          { price: 7535, pl: 1030 },
+          { price: 7650, pl: 3090 }
         ]
       },
       {
         action: 'BUY',
         optionType: 'PUT',
-        strike: 19300,
-        expiry: '25 Nov 2025',
-        premium: 110,
-        projectedPl: -2000,
-        marginImpact: -55000,
+        strike: 7455,
+        expiry: '02 Oct 2026',
+        premium: 42.5,
+        projectedPl: -1030,
+        marginImpact: -28330,
         payoffPoints: [
-          { price: 19000, pl: 12000 },
-          { price: 19300, pl: 0 },
-          { price: 19600, pl: -4000 }
+          { price: 7340, pl: 6180 },
+          { price: 7455, pl: 0 },
+          { price: 7575, pl: -2060 }
         ]
       }
     ]
@@ -150,47 +150,47 @@ export const dashboardMock: DashboardData = {
   {
       name: 'Call Calendar Spread',
       type: 'Directional Debit',
-      strikes: '19800 / 20100',
-      expectedPl: 9400,
-      maxLoss: 12000,
+      strikes: '7650 / 7765',
+      expectedPl: 4840,
+      maxLoss: 6180,
       winProbability: 0.57,
       riskReward: 1.5,
-      margin: 110000,
+      margin: 56670,
       score: 82,
       payoffPoints: [
-        { price: 19300, pl: -15000 },
-        { price: 19650, pl: 2000 },
-        { price: 19800, pl: 9400 },
-        { price: 20050, pl: 6000 },
-        { price: 20300, pl: -8000 }
+        { price: 7455, pl: -7730 },
+        { price: 7590, pl: 1030 },
+        { price: 7650, pl: 4840 },
+        { price: 7745, pl: 3090 },
+        { price: 7845, pl: -4120 }
       ],
       legs: [
         {
           action: 'BUY',
           optionType: 'CALL',
-          strike: 19800,
-          expiry: '25 Nov 2025',
-          premium: 180,
-          projectedPl: 6200,
-          marginImpact: -65000,
+          strike: 7650,
+          expiry: '02 Oct 2026',
+          premium: 69.5,
+          projectedPl: 3190,
+          marginImpact: -33480,
           payoffPoints: [
-            { price: 19500, pl: -1200 },
-            { price: 19800, pl: 0 },
-            { price: 20100, pl: 3200 }
+            { price: 7535, pl: -620 },
+            { price: 7650, pl: 0 },
+            { price: 7765, pl: 1650 }
           ]
         },
         {
           action: 'SELL',
           optionType: 'CALL',
-          strike: 20100,
-          expiry: '02 Dec 2025',
-          premium: 220,
-          projectedPl: 3200,
-          marginImpact: 120000,
+          strike: 7765,
+          expiry: '09 Oct 2026',
+          premium: 85.0,
+          projectedPl: 1650,
+          marginImpact: 61820,
           payoffPoints: [
-            { price: 19800, pl: 4200 },
-            { price: 20100, pl: 2200 },
-            { price: 20450, pl: -3200 }
+            { price: 7650, pl: 2160 },
+            { price: 7765, pl: 1130 },
+            { price: 7900, pl: -1650 }
           ]
         }
       ]
@@ -198,47 +198,47 @@ export const dashboardMock: DashboardData = {
   {
       name: 'Bull Put Spread',
       type: 'Directional Credit',
-      strikes: '19500 / 19350',
-      expectedPl: 7800,
-      maxLoss: 17000,
+      strikes: '7535 / 7475',
+      expectedPl: 4020,
+      maxLoss: 8760,
       winProbability: 0.72,
       riskReward: 1.1,
-      margin: 185000,
+      margin: 95300,
       score: 77,
       payoffPoints: [
-        { price: 19200, pl: -17000 },
-        { price: 19400, pl: 2000 },
-        { price: 19500, pl: 7800 },
-        { price: 19800, pl: 4500 },
-        { price: 20000, pl: -5000 }
+        { price: 7420, pl: -8760 },
+        { price: 7495, pl: 1030 },
+        { price: 7535, pl: 4020 },
+        { price: 7650, pl: 2320 },
+        { price: 7725, pl: -2580 }
       ],
       legs: [
         {
           action: 'SELL',
           optionType: 'PUT',
-          strike: 19500,
-          expiry: '25 Nov 2025',
-          premium: 140,
-          projectedPl: 7200,
-          marginImpact: 100000,
+          strike: 7535,
+          expiry: '02 Oct 2026',
+          premium: 54.1,
+          projectedPl: 3710,
+          marginImpact: 51520,
           payoffPoints: [
-            { price: 19200, pl: -16000 },
-            { price: 19500, pl: 1400 },
-            { price: 19750, pl: 4200 }
+            { price: 7420, pl: -8240 },
+            { price: 7535, pl: 720 },
+            { price: 7630, pl: 2160 }
           ]
         },
         {
           action: 'BUY',
           optionType: 'PUT',
-          strike: 19350,
-          expiry: '25 Nov 2025',
-          premium: 95,
-          projectedPl: 600,
-          marginImpact: -60000,
+          strike: 7475,
+          expiry: '02 Oct 2026',
+          premium: 36.7,
+          projectedPl: 310,
+          marginImpact: -30910,
           payoffPoints: [
-            { price: 19050, pl: 6000 },
-            { price: 19350, pl: 0 },
-            { price: 19600, pl: -2400 }
+            { price: 7360, pl: 3090 },
+            { price: 7475, pl: 0 },
+            { price: 7575, pl: -1240 }
           ]
         }
       ]
@@ -247,8 +247,8 @@ export const dashboardMock: DashboardData = {
   greeks: {
     delta: 0.07,
     gamma: -0.01,
-    theta: 4200,
-    vega: -1650,
+    theta: 2160,
+    vega: -850,
     rho: 110
   }
 };

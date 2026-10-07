@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS strategy_legs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     strategy_id UUID NOT NULL REFERENCES strategies(id) ON DELETE CASCADE,
     action VARCHAR(10) NOT NULL CHECK (action IN ('BUY', 'SELL')),
-    option_type VARCHAR(2) NOT NULL CHECK (option_type IN ('CE', 'PE')),
-    strike_offset INT NOT NULL, -- Offset from ATM in points (e.g., 0, +50, -100)
+    option_type VARCHAR(2) NOT NULL CHECK (option_type IN ('C', 'P')),
+    strike_offset INT NOT NULL, -- Offset from ATM in points (e.g., 0, +50, -25)
     quantity INT NOT NULL CHECK (quantity > 0),
     leg_order INT NOT NULL, -- Order of execution
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS backtest_trade_legs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     trade_id UUID NOT NULL REFERENCES backtest_trades(id) ON DELETE CASCADE,
     action VARCHAR(10) NOT NULL CHECK (action IN ('BUY', 'SELL')),
-    option_type VARCHAR(2) NOT NULL CHECK (option_type IN ('CE', 'PE')),
+    option_type VARCHAR(2) NOT NULL CHECK (option_type IN ('C', 'P')),
     strike DECIMAL(10,2) NOT NULL,
     expiry_date DATE NOT NULL,
     quantity INT NOT NULL,
@@ -117,7 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_backtest_trades_dates ON backtest_trades(entry_da
 CREATE INDEX IF NOT EXISTS idx_backtest_trade_legs_trade ON backtest_trade_legs(trade_id);
 
 -- Insert pre-defined strategies
-INSERT INTO strategies (name, strategy_type, description) VALUES
+INSERT INTO strategies (name, strategy_type, description)
+SELECT v.name, v.strategy_type, v.description FROM (VALUES
 ('Long Straddle', 'LONG_STRADDLE', 'Buy ATM call and put with same strike and expiry. Profit from large moves in either direction.'),
 ('Short Straddle', 'SHORT_STRADDLE', 'Sell ATM call and put with same strike and expiry. Profit from low volatility.'),
 ('Long Strangle', 'LONG_STRANGLE', 'Buy OTM call and put. Lower cost than straddle, needs larger move to profit.'),
@@ -126,7 +127,9 @@ INSERT INTO strategies (name, strategy_type, description) VALUES
 ('Bear Put Spread', 'BEAR_PUT_SPREAD', 'Buy higher strike put, sell lower strike put. Profit from downward move.'),
 ('Iron Condor', 'IRON_CONDOR', 'Sell OTM call spread and put spread. Profit from range-bound market.'),
 ('Iron Butterfly', 'IRON_BUTTERFLY', 'Sell ATM straddle, buy OTM strangle. Profit from low volatility.')
-ON CONFLICT DO NOTHING;
+) AS v(name, strategy_type, description)
+-- strategies has no unique key, so ON CONFLICT never fired and re-runs duplicated rows
+WHERE NOT EXISTS (SELECT 1 FROM strategies s WHERE s.strategy_type = v.strategy_type);
 
 -- Get strategy IDs (for leg insertion)
 DO $$
@@ -151,46 +154,62 @@ BEGIN
     SELECT id INTO iron_butterfly_id FROM strategies WHERE strategy_type = 'IRON_BUTTERFLY' LIMIT 1;
 
     -- Long Straddle legs
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = straddle_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (straddle_id, 'BUY', 'CE', 0, 1, 1),
-    (straddle_id, 'BUY', 'PE', 0, 1, 2);
+        (straddle_id, 'BUY', 'C', 0, 1, 1),
+        (straddle_id, 'BUY', 'P', 0, 1, 2);
+    END IF;
 
     -- Short Straddle legs
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = short_straddle_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (short_straddle_id, 'SELL', 'CE', 0, 1, 1),
-    (short_straddle_id, 'SELL', 'PE', 0, 1, 2);
+        (short_straddle_id, 'SELL', 'C', 0, 1, 1),
+        (short_straddle_id, 'SELL', 'P', 0, 1, 2);
+    END IF;
 
-    -- Long Strangle legs (100 points OTM)
+    -- Long Strangle legs (25 points OTM)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = strangle_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (strangle_id, 'BUY', 'CE', 100, 1, 1),
-    (strangle_id, 'BUY', 'PE', -100, 1, 2);
+        (strangle_id, 'BUY', 'C', 25, 1, 1),
+        (strangle_id, 'BUY', 'P', -25, 1, 2);
+    END IF;
 
-    -- Short Strangle legs (100 points OTM)
+    -- Short Strangle legs (25 points OTM)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = short_strangle_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (short_strangle_id, 'SELL', 'CE', 100, 1, 1),
-    (short_strangle_id, 'SELL', 'PE', -100, 1, 2);
+        (short_strangle_id, 'SELL', 'C', 25, 1, 1),
+        (short_strangle_id, 'SELL', 'P', -25, 1, 2);
+    END IF;
 
-    -- Bull Call Spread legs (Buy ATM, Sell 100 OTM)
+    -- Bull Call Spread legs (Buy ATM, Sell 25 OTM)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = bull_call_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (bull_call_id, 'BUY', 'CE', 0, 1, 1),
-    (bull_call_id, 'SELL', 'CE', 100, 1, 2);
+        (bull_call_id, 'BUY', 'C', 0, 1, 1),
+        (bull_call_id, 'SELL', 'C', 25, 1, 2);
+    END IF;
 
-    -- Bear Put Spread legs (Buy ATM, Sell 100 OTM)
+    -- Bear Put Spread legs (Buy ATM, Sell 25 OTM)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = bear_put_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (bear_put_id, 'BUY', 'PE', 0, 1, 1),
-    (bear_put_id, 'SELL', 'PE', -100, 1, 2);
+        (bear_put_id, 'BUY', 'P', 0, 1, 1),
+        (bear_put_id, 'SELL', 'P', -25, 1, 2);
+    END IF;
 
-    -- Iron Condor legs (Sell 100 OTM call/put spread, Buy 200 OTM call/put)
+    -- Iron Condor legs (Sell 25 OTM call/put spread, Buy 50 OTM call/put)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = iron_condor_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (iron_condor_id, 'BUY', 'PE', -200, 1, 1),
-    (iron_condor_id, 'SELL', 'PE', -100, 1, 2),
-    (iron_condor_id, 'SELL', 'CE', 100, 1, 3),
-    (iron_condor_id, 'BUY', 'CE', 200, 1, 4);
+        (iron_condor_id, 'BUY', 'P', -50, 1, 1),
+        (iron_condor_id, 'SELL', 'P', -25, 1, 2),
+        (iron_condor_id, 'SELL', 'C', 25, 1, 3),
+        (iron_condor_id, 'BUY', 'C', 50, 1, 4);
+    END IF;
 
-    -- Iron Butterfly legs (Sell ATM straddle, Buy 100 OTM strangle)
+    -- Iron Butterfly legs (Sell ATM straddle, Buy 25 OTM strangle)
+    IF NOT EXISTS (SELECT 1 FROM strategy_legs WHERE strategy_id = iron_butterfly_id) THEN
     INSERT INTO strategy_legs (strategy_id, action, option_type, strike_offset, quantity, leg_order) VALUES
-    (iron_butterfly_id, 'BUY', 'PE', -100, 1, 1),
-    (iron_butterfly_id, 'SELL', 'PE', 0, 1, 2),
-    (iron_butterfly_id, 'SELL', 'CE', 0, 1, 3),
-    (iron_butterfly_id, 'BUY', 'CE', 100, 1, 4);
+        (iron_butterfly_id, 'BUY', 'P', -25, 1, 1),
+        (iron_butterfly_id, 'SELL', 'P', 0, 1, 2),
+        (iron_butterfly_id, 'SELL', 'C', 0, 1, 3),
+        (iron_butterfly_id, 'BUY', 'C', 25, 1, 4);
+    END IF;
 END $$;

@@ -5,7 +5,7 @@ export function GreekStats() {
   const labels: Record<string, string> = {
     delta: 'Delta',
     gamma: 'Gamma',
-    theta: 'Theta (₹/day)',
+    theta: 'Theta ($/day)',
     vega: 'Vega',
     rho: 'Rho'
   };

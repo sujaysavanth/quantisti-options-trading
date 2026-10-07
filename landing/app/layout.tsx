@@ -1,35 +1,32 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
+import { Inter } from 'next/font/google'
 import './globals.css'
-import { ThemeProvider } from '@/components/ThemeProvider'
+import { Providers } from '@/components/Providers'
+
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' })
 
 export const metadata: Metadata = {
-  title: 'Quantisti - Intelligent Options Trading Platform',
-  description: 'Simulate, analyze, and optimize your options strategies with ML-powered predictions, SHAP explainability, and comprehensive risk analytics.',
-  keywords: ['options trading', 'machine learning', 'trading simulator', 'portfolio tracker', 'risk analytics', 'SHAP', 'XGBoost'],
-  authors: [{ name: 'Quantisti' }],
+  title: 'Quantisti — Options, explained.',
+  description:
+    'Predict the week’s S&P 500 range, pick the SPX options strategy, and see exactly why. ML signals with SHAP explanations, Black-Scholes pricing, backtests and paper trading.',
+  keywords: ['options trading', 'SPX', 'S&P 500', '0DTE', 'trading simulator', 'machine learning', 'SHAP', 'XGBoost', 'Black-Scholes'],
+  authors: [{ name: 'Sujay Govindappa Rajashekar', url: 'https://github.com/sujaysavanth' }],
   openGraph: {
-    title: 'Quantisti - Intelligent Options Trading Platform',
-    description: 'ML-powered options trading with explainability and risk analytics',
+    title: 'Quantisti — Options, explained.',
+    description: 'Predict the week’s range. Pick the strategy. See exactly why.',
     type: 'website',
   },
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export const viewport: Viewport = {
+  themeColor: '#000000',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={inter.variable}>
       <body>
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="system"
-          enableSystem
-          disableTransitionOnChange
-        >
-          {children}
-        </ThemeProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

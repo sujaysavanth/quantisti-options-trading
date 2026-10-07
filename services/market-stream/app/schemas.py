@@ -7,23 +7,41 @@ from pydantic import BaseModel, Field
 
 
 class OptionLegQuote(BaseModel):
-    identifier: str = Field(..., description="Unique option identifier, e.g., NIFTY25NOV19500PE")
+    identifier: str = Field(..., description="Unique option identifier (OCC symbol), e.g., SPXW261002P07600000")
     strike: float
     option_type: Literal["CALL", "PUT"]
     expiry: date
     bid: Optional[float] = None
     ask: Optional[float] = None
     last: Optional[float] = None
+    volume: Optional[int] = None
+    open_interest: Optional[int] = Field(default=None, description="None when the source doesn't report it")
     iv: Optional[float] = Field(default=None, description="Implied volatility for the leg")
+    delta: Optional[float] = None
+
+
+class ExpirySummary(BaseModel):
+    expiry: date
+    dte: int = Field(..., description="Calendar days to expiry")
+    atm_iv: Optional[float] = None
+    forward: Optional[float] = Field(default=None, description="Forward implied by put-call parity")
+    quoted_at: Optional[datetime] = None
 
 
 class QuoteUpsert(BaseModel):
-    symbol: str = Field(..., description="Underlying symbol, e.g., NIFTY")
+    symbol: str = Field(..., description="Underlying symbol, e.g., SPX")
     last_price: float = Field(..., ge=0)
     change: Optional[float] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     spot_iv: Optional[float] = Field(default=None, description="Implied volatility at ATM")
     legs: List[OptionLegQuote] = Field(default_factory=list)
+    # One row per expiry in `legs`, and the one the UI should show first.
+    expiries: List[ExpirySummary] = Field(default_factory=list)
+    default_expiry: Optional[date] = None
+    # Where the quotes come from and how stale they are, so the UI can label them honestly.
+    source: Optional[str] = Field(default=None, description="Data source, e.g. cboe")
+    delay_minutes: Optional[int] = Field(default=None, ge=0, description="Delay of the source's quotes")
+    quoted_at: Optional[datetime] = Field(default=None, description="Time the option quotes are from")
 
 
 class QuoteSnapshot(QuoteUpsert):

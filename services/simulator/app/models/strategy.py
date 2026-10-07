@@ -42,16 +42,16 @@ class PositionAction(str, Enum):
 
 class OptionType(str, Enum):
     """Option type."""
-    CE = "CE"  # Call European
-    PE = "PE"  # Put European
+    C = "C"  # Call
+    P = "P"  # Put
 
 
 class StrategyLeg(BaseModel):
     """Individual leg of a strategy."""
     action: PositionAction = Field(..., description="BUY or SELL")
-    option_type: OptionType = Field(..., description="CE or PE")
+    option_type: OptionType = Field(..., description="C or P")
     strike_offset: int = Field(..., description="Strike offset from ATM in points (e.g., 0, +50, -100)")
-    quantity: int = Field(..., gt=0, description="Number of lots")
+    quantity: int = Field(..., gt=0, description="Number of contracts")
     leg_order: int = Field(..., ge=1, description="Order of execution")
     expiry_offset: int = Field(0, ge=0, description="Expiry offset in weeks (0=current, 1=next week)")
 
@@ -59,7 +59,7 @@ class StrategyLeg(BaseModel):
         "json_schema_extra": {
             "example": {
                 "action": "BUY",
-                "option_type": "CE",
+                "option_type": "C",
                 "strike_offset": 0,
                 "quantity": 1,
                 "leg_order": 1
@@ -91,14 +91,14 @@ class StrategyCreate(BaseModel):
                 "legs": [
                     {
                         "action": "BUY",
-                        "option_type": "CE",
+                        "option_type": "C",
                         "strike_offset": 0,
                         "quantity": 1,
                         "leg_order": 1
                     },
                     {
                         "action": "SELL",
-                        "option_type": "CE",
+                        "option_type": "C",
                         "strike_offset": 100,
                         "quantity": 1,
                         "leg_order": 2

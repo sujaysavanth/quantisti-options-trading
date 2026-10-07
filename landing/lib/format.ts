@@ -1,0 +1,24 @@
+/** CSS percentage rounded to 3 dp. Browsers round long inline-style decimals, which breaks hydration. */
+export function pc(fraction: number): string {
+  return `${Number((fraction * 100).toFixed(3))}%`
+}
+
+const usdFmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 })
+
+/** $12,345 style, with an explicit sign when `signed` is set. */
+export function usd(value: number, signed = false): string {
+  const sign = value < 0 ? '−' : signed && value > 0 ? '+' : ''
+  return `${sign}$${usdFmt.format(Math.abs(Math.round(value)))}`
+}
+
+export function num(value: number, digits = 0): string {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value)
+}
+
+export function pct(value: number, digits = 0, signed = false): string {
+  const sign = value < 0 ? '−' : signed && value > 0 ? '+' : ''
+  return `${sign}${Math.abs(value * 100).toFixed(digits)}%`
+}

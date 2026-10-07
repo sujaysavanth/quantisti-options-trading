@@ -1,5 +1,6 @@
 """Pydantic models for live strategy suggestions."""
 
+from datetime import datetime
 from typing import List, Literal, Optional
 from pydantic import BaseModel
 
@@ -23,3 +24,9 @@ class StrategyInstance(BaseModel):
     max_loss: Optional[float]
     breakevens: List[float] = []
     legs: List[StrategyLeg]
+    # Copied from the market-stream quote the strategy was built from.
+    expiry: Optional[str] = None
+    spot_price: Optional[float] = None
+    source: Optional[str] = None
+    delay_minutes: Optional[int] = None
+    quoted_at: Optional[datetime] = None

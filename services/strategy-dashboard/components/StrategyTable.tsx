@@ -3,6 +3,7 @@
 import type { StrategyRecommendation } from '@/data/mockDashboard';
 import { ArrowUpRight } from 'lucide-react';
 import classNames from 'classnames';
+import { optionCode, usd, usdK } from '@/data/format';
 
 interface StrategyTableProps {
   strategies: StrategyRecommendation[];
@@ -11,7 +12,7 @@ interface StrategyTableProps {
 }
 
 const formatCurrency = (value?: number) =>
-  `₹${(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  usd(value);
 
 export function StrategyTable({ strategies, selectedStrategy, onSelect }: StrategyTableProps) {
   return (
@@ -71,7 +72,7 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect }: Strate
                       .map(
                         (leg) =>
                           `${leg.action === 'SELL' ? 'Short' : 'Long'} ${leg.strike} ${
-                            leg.optionType === 'CALL' ? 'CE' : 'PE'
+                            optionCode(leg.optionType)
                           }`
                       )
                       .join(' · ')}
@@ -85,7 +86,7 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect }: Strate
                   <td className="py-4 pr-4">
                     {strategy.riskReward ? strategy.riskReward.toFixed(1) : '—'}
                   </td>
-                  <td className="py-4 pr-4">{`₹${((strategy.margin ?? 0) / 1000).toFixed(0)}K`}</td>
+                  <td className="py-4 pr-4">{usdK(strategy.margin)}</td>
                   <td className="py-4 pr-4 text-center">
                     <span
                       className={classNames(

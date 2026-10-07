@@ -10,7 +10,12 @@ dependencies = [
     "psycopg2-binary>=2.9.9",
     "scipy>=1.11.4",
     "numpy>=1.26.0",
+    "pandas>=2.1.0",
+    "exchange_calendars>=4.5",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
 
 [build-system]
 requires = ["setuptools", "wheel"]

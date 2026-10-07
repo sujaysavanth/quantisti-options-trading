@@ -2,6 +2,7 @@
 
 import type { StrategyRecommendation, OptionLeg } from '@/data/mockDashboard';
 import classNames from 'classnames';
+import { num, usd, usdK } from '@/data/format';
 
 interface OptionBreakdownProps {
   strategy: StrategyRecommendation | null;
@@ -10,7 +11,7 @@ interface OptionBreakdownProps {
 }
 
 const formatCurrency = (value?: number) =>
-  `₹${(value ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+  usd(value);
 
 export function OptionBreakdown({ strategy, selectedLeg, onSelectLeg }: OptionBreakdownProps) {
   if (!strategy) {
@@ -32,7 +33,7 @@ export function OptionBreakdown({ strategy, selectedLeg, onSelectLeg }: OptionBr
         </div>
         <div className="text-right">
           <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Net Margin Used</p>
-          <p className="text-lg font-semibold">{`₹${(totalMargin / 1000).toFixed(0)}K`}</p>
+          <p className="text-lg font-semibold">{usdK(totalMargin)}</p>
         </div>
       </div>
       <div className="overflow-x-auto">
@@ -80,7 +81,7 @@ export function OptionBreakdown({ strategy, selectedLeg, onSelectLeg }: OptionBr
                   </td>
                   <td className="py-3 pr-4">{leg.quantity ?? 1}</td>
                   <td className="py-3 pr-4">{leg.optionType}</td>
-                  <td className="py-3 pr-4">{`₹${leg.strike.toLocaleString('en-IN')}`}</td>
+                  <td className="py-3 pr-4">{num(leg.strike)}</td>
                   <td className="py-3 pr-4">{leg.expiry}</td>
                   <td className="py-3 pr-4">{formatCurrency(leg.premium)}</td>
                   <td className="py-3 pr-4">

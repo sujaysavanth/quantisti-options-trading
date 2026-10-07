@@ -32,12 +32,12 @@ class Settings(BaseSettings):
     )
 
     # Backtest settings
-    DEFAULT_INITIAL_CAPITAL: float = 100000.0  # ₹1 lakh
+    DEFAULT_INITIAL_CAPITAL: float = 100_000.0  # USD
     DEFAULT_STRIKE_RANGE: int = 10
     MAX_CONCURRENT_BACKTESTS: int = 5
 
-    # Lot size for Nifty options
-    NIFTY_LOT_SIZE: int = 50
+    # SPX contract multiplier: one contract = 100 x index points
+    CONTRACT_MULTIPLIER: int = 100
 
     class Config:
         env_file = ".env"

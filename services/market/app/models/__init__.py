@@ -1,8 +1,8 @@
 """Pydantic models for Market service."""
 
 from .market_data import (
-    NiftyHistoricalResponse,
-    NiftySpotResponse,
+    UnderlyingHistoryResponse,
+    UnderlyingSpotResponse,
     CandleData,
     HistoricalDataQuery
 )
@@ -15,8 +15,8 @@ from .options import (
 )
 
 __all__ = [
-    "NiftyHistoricalResponse",
-    "NiftySpotResponse",
+    "UnderlyingHistoryResponse",
+    "UnderlyingSpotResponse",
     "CandleData",
     "HistoricalDataQuery",
     "OptionChainResponse",

@@ -1,16 +1,11 @@
 """Market data service.
 
 Purpose:
-    - Provides market and options reference data for Nifty options
-    - Generates option chains with Black-Scholes pricing
-    - Calculates Greeks for options
-    - Serves historical Nifty OHLCV data
-
-Features:
-    - Black-Scholes pricing for European options
-    - Greeks calculation (Delta, Gamma, Theta, Vega, Rho)
-    - Historical volatility-based pricing
-    - Mock data generation for development/testing
+    - Serves S&P 500 index (SPX) daily history
+    - Builds SPX option chains: collected listed quotes when available,
+      otherwise Black-Scholes priced from the close, VIX and T-bill rate
+    - Calculates Greeks and implied volatility
+    - Knows the SPX expiry calendar (see market_spec.py)
 """
 
 import logging
@@ -20,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db.connection import initialize_pool, close_db_connection
-from .routers import health, nifty, options
+from .routers import health, options, underlying
 
 # Configure logging
 logging.basicConfig(
@@ -34,7 +29,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.SERVICE_NAME,
     version=settings.VERSION,
-    description="Market data service providing Nifty options data with Black-Scholes pricing",
+    description="SPX index data and option chains with implied volatility and Greeks",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -50,7 +45,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, prefix="/health")
-app.include_router(nifty.router, prefix="/v1")
+app.include_router(underlying.router, prefix="/v1")
 app.include_router(options.router, prefix="/v1")
 
 
@@ -90,8 +85,9 @@ async def root():
         "endpoints": {
             "docs": "/docs",
             "health": "/health/healthz",
-            "nifty_spot": "/v1/nifty/spot",
-            "nifty_historical": "/v1/nifty/historical",
-            "option_chain": "/v1/options/chain"
+            "spot": "/v1/underlying/spot",
+            "historical": "/v1/underlying/historical",
+            "option_chain": "/v1/options/chain",
+            "expiries": "/v1/options/expiries"
         }
     }

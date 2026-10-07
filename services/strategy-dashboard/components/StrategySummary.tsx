@@ -54,7 +54,7 @@ export function StrategySummary({
         </div>
         <dl className="grid grid-cols-2 gap-4">
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/40 p-4">
-            <dt className="text-sm text-slate-500 dark:text-slate-400">India VIX</dt>
+            <dt className="text-sm text-slate-500 dark:text-slate-400">VIX</dt>
             <dd className="text-2xl font-semibold">{context.vix.toFixed(1)}</dd>
           </div>
           <div className="rounded-2xl bg-slate-50 dark:bg-slate-800/40 p-4">

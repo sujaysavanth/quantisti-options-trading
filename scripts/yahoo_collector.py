@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch intraday candles from Yahoo Finance and forward to market-stream."""
+"""Fetch the latest S&P 500 index price from Yahoo Finance and forward it to market-stream."""
 
 import argparse
 import json
@@ -64,19 +64,20 @@ def fetch_latest(symbol: str, interval: str = "1m", range_: str = "1d") -> Optio
 
 def push(symbol: str, timestamp: datetime, price: float, market_stream_url: str):
     payload = {
-        "symbol": symbol.upper(),
+        "symbol": symbol,
         "last_price": price,
         "timestamp": timestamp.isoformat(),
         "legs": []
     }
     response = requests.post(f"{market_stream_url.rstrip('/')}/v1/quotes", json=payload, timeout=15)
     response.raise_for_status()
-    logger.info("Pushed %s @ %s", symbol.upper(), price)
+    logger.info("Pushed %s @ %s", symbol, price)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Yahoo Finance minute collector -> market-stream")
-    parser.add_argument("--symbol", default="^NSEI", help="Yahoo ticker (default: ^NSEI)")
+    parser.add_argument("--symbol", default="^GSPC", help="Yahoo ticker to poll (default: ^GSPC)")
+    parser.add_argument("--push-symbol", default="SPX", help="Symbol published to market-stream (default: SPX)")
     parser.add_argument("--interval", default="1m", help="Yahoo interval (1m,5m,15m, etc.)")
     parser.add_argument("--range", default="1d", help="Yahoo range (1d,5d,1mo, etc.)")
     parser.add_argument("--market-stream-url", default="http://localhost:8090")
@@ -88,7 +89,7 @@ def main():
         try:
             latest = fetch_latest(args.symbol, args.interval, args.range)
             if latest:
-                push(args.symbol, latest[0], latest[1], args.market_stream_url)
+                push(args.push_symbol, latest[0], latest[1], args.market_stream_url)
             else:
                 logger.warning("No latest price available.")
         except requests.HTTPError as exc:

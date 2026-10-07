@@ -1,0 +1,11 @@
+# Lint for every Python service (CI runs `ruff check services scripts`).
+# Deliberately minimal: only rules that catch real bugs, not style.
+#   E9   syntax errors and the like
+#   F    pyflakes: undefined names, unused imports/variables, redefinitions, bad f-strings
+# Widen `select` later (e.g. "B" bugbear, "I" import order) once the codebase is clean against it.
+
+target-version = "py310"   # the Spark image runs Python 3.10; the services run 3.11
+extend-exclude = ["**/node_modules", "**/.next", "landing", "services/strategy-dashboard"]
+
+[lint]
+select = ["E9", "F"]

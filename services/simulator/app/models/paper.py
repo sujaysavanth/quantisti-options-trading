@@ -20,7 +20,7 @@ class PaperLegInput(BaseModel):
 
 
 class PaperTradeCreate(BaseModel):
-    symbol: str = "NIFTY"
+    symbol: str = "SPX"
     nickname: Optional[str] = None
     legs: List[PaperLegInput]
 

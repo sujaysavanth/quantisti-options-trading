@@ -12,6 +12,9 @@ from ..db.connection import get_db_connection, return_db_connection
 
 logger = logging.getLogger(__name__)
 
+# Annual risk-free rate for Sharpe/Sortino: roughly the recent 3-month US T-bill.
+RISK_FREE_RATE = 0.04
+
 
 class MetricsCalculator:
     """Calculator for backtest performance metrics."""
@@ -102,11 +105,12 @@ class MetricsCalculator:
         gross_loss = abs(sum(p for p in pnls if p < 0))
         profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
 
-        # Sharpe ratio
-        sharpe_ratio = self._calculate_sharpe_ratio(pnls)
-
-        # Sortino ratio
-        sortino_ratio = self._calculate_sortino_ratio(pnls)
+        # Risk-adjusted returns: each trade's P&L as a return on capital, annualised
+        # by how often trades were actually entered.
+        returns = [p / initial_capital for p in pnls] if initial_capital > 0 else []
+        periods_per_year = self._periods_per_year([t['entry_date'] for t in trades])
+        sharpe_ratio = self._calculate_sharpe_ratio(returns, periods_per_year)
+        sortino_ratio = self._calculate_sortino_ratio(returns, periods_per_year)
 
         # Holding days
         holding_days = [int(t['holding_days']) for t in trades if t.get('holding_days')]
@@ -135,70 +139,39 @@ class MetricsCalculator:
             'total_return_pct': round(total_return_pct, 4)
         }
 
-    def _calculate_sharpe_ratio(self, returns: List[float], risk_free_rate: float = 0.065) -> Optional[float]:
-        """Calculate Sharpe ratio.
+    @staticmethod
+    def _periods_per_year(entry_dates: List[Any]) -> float:
+        """Trades per year implied by the average gap between entries (weekly entries -> ~52)."""
+        if len(entry_dates) < 2:
+            return 52.0
+        span_days = (max(entry_dates) - min(entry_dates)).days
+        if span_days <= 0:
+            return 252.0
+        return 365.25 * (len(entry_dates) - 1) / span_days
 
-        Args:
-            returns: List of trade returns
-            risk_free_rate: Annual risk-free rate (default 6.5%)
-
-        Returns:
-            Sharpe ratio or None if cannot calculate
-        """
-        if not returns or len(returns) < 2:
+    @staticmethod
+    def _calculate_sharpe_ratio(returns: List[float], periods_per_year: float,
+                                risk_free_rate: float = RISK_FREE_RATE) -> Optional[float]:
+        """Annualised Sharpe ratio of per-trade returns on capital."""
+        if len(returns) < 2:
             return None
-
-        returns_array = np.array(returns)
-        mean_return = np.mean(returns_array)
-        std_return = np.std(returns_array, ddof=1)
-
-        if std_return == 0:
+        excess = np.array(returns) - risk_free_rate / periods_per_year
+        std = float(np.std(excess, ddof=1))
+        if std == 0:
             return None
+        return float(np.mean(excess)) / std * math.sqrt(periods_per_year)
 
-        # Annualize (assuming ~252 trading days)
-        # Daily risk-free rate
-        daily_rf = risk_free_rate / 252
-
-        sharpe = (mean_return - daily_rf) / std_return
-        # Annualize Sharpe ratio
-        sharpe_annual = sharpe * math.sqrt(252)
-
-        return sharpe_annual
-
-    def _calculate_sortino_ratio(self, returns: List[float], risk_free_rate: float = 0.065) -> Optional[float]:
-        """Calculate Sortino ratio (uses downside deviation).
-
-        Args:
-            returns: List of trade returns
-            risk_free_rate: Annual risk-free rate
-
-        Returns:
-            Sortino ratio or None if cannot calculate
-        """
-        if not returns or len(returns) < 2:
+    @staticmethod
+    def _calculate_sortino_ratio(returns: List[float], periods_per_year: float,
+                                 risk_free_rate: float = RISK_FREE_RATE) -> Optional[float]:
+        """Annualised Sortino ratio: excess return over downside deviation (below the risk-free rate)."""
+        if len(returns) < 2:
             return None
-
-        returns_array = np.array(returns)
-        mean_return = np.mean(returns_array)
-
-        # Calculate downside deviation (only negative returns)
-        negative_returns = returns_array[returns_array < 0]
-        if len(negative_returns) == 0:
+        excess = np.array(returns) - risk_free_rate / periods_per_year
+        downside = float(np.sqrt(np.mean(np.minimum(excess, 0.0) ** 2)))
+        if downside == 0:
             return None
-
-        downside_dev = np.std(negative_returns, ddof=1)
-
-        if downside_dev == 0:
-            return None
-
-        # Daily risk-free rate
-        daily_rf = risk_free_rate / 252
-
-        sortino = (mean_return - daily_rf) / downside_dev
-        # Annualize Sortino ratio
-        sortino_annual = sortino * math.sqrt(252)
-
-        return sortino_annual
+        return float(np.mean(excess)) / downside * math.sqrt(periods_per_year)
 
     def _empty_metrics(self, backtest_id: UUID, initial_capital: float) -> Dict[str, Any]:
         """Return empty metrics when no trades."""
@@ -226,6 +199,7 @@ class MetricsCalculator:
         conn = get_db_connection()
         try:
             cursor = conn.cursor()
+            metrics = {k: v.item() if isinstance(v, np.generic) else v for k, v in metrics.items()}
 
             # Delete existing metrics if any
             cursor.execute(

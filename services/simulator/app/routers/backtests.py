@@ -1,9 +1,8 @@
 """Backtest management and execution endpoints."""
 
 import logging
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
-import asyncio
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from psycopg2.extras import RealDictCursor

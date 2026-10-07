@@ -1,0 +1,147 @@
+# Streaming stack: Kafka (KRaft), topic setup and Kafka UI.
+# Use together with the base file so services share one network:
+#   docker compose -f docker-compose.yml -f docker-compose.streaming.yml up -d kafka kafka-init kafka-ui
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    hostname: kafka
+    ports:
+      - "9094:9094"   # for tools on your machine; containers use kafka:9092
+    environment:
+      # Single node acting as both broker and KRaft controller (no ZooKeeper).
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # INTERNAL for containers, EXTERNAL for the host, CONTROLLER for KRaft consensus.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # One broker, so every internal topic has one replica.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created explicitly by kafka-init, never by a typo in a producer.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: JKP_sDNzR3Kgb3z4YI99rg
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 15s
+
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infra/kafka/create-topics.sh:/scripts/create-topics.sh:ro
+    entrypoint: ["bash", "/scripts/create-topics.sh"]
+    environment:
+      BOOTSTRAP: kafka:9092
+    restart: "no"
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8089:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: quantisti
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+
+  # Polls free market data and publishes it to the topics above (services/ingest).
+  ingest:
+    build: ./services/ingest
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${INGEST_HOST_PORT:-8088}:8087"   # 8088 on the host by default, since 8087 is often taken
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      CHAIN_SOURCE: cboe
+      PRODUCERS_ENABLED: "true"
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti   # gap detector reads coverage here
+      GAPS_ENABLED: "true"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8087/health/readyz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Kafka -> market-stream: keeps the latest SPX quote and chain and posts it for the dashboard.
+  # Same image as ingest, different entry point.
+  stream-bridge:
+    build: ./services/ingest
+    command: ["python", "-m", "app.bridge"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      market_stream:
+        condition: service_started
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      MARKET_STREAM_URL: http://market_stream:8090
+      BRIDGE_MIN_DTE: "1"
+    restart: unless-stopped
+
+  # Spark Structured Streaming: market.daily and options.chain.quotes -> Postgres (services/stream-processing).
+  spark:
+    build: ./services/stream-processing
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti
+      TRIGGER_INTERVAL: 30 seconds
+    ports:
+      - "4040:4040"   # Spark UI -> Structured Streaming tab
+    volumes:
+      - spark_checkpoints:/checkpoints   # the offsets each query has written; delete to reprocess from scratch
+    mem_limit: 2g
+    restart: unless-stopped
+
+  # One-off Spark batch jobs (same image), e.g. the OptionsDX import. Not started by `up`:
+  #   docker compose -f docker-compose.yml -f docker-compose.streaming.yml run --rm spark-import
+  spark-import:
+    build: ./services/stream-processing
+    profiles: ["tools"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://quantisti:quantisti@postgres:5432/quantisti
+    volumes:
+      - ./data:/data:ro               # OptionsDX files in data/optionsdx/spx (git-ignored)
+    mem_limit: 6g
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[4]", "--driver-memory", "4g",
+              "--conf", "spark.sql.session.timeZone=UTC", "jobs/import_optionsdx.py", "--input", "/data/optionsdx/spx"]
+
+volumes:
+  kafka_data:
+  spark_checkpoints:

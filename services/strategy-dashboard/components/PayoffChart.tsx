@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react';
 import type { StrategyRecommendation } from '@/data/mockDashboard';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine } from 'recharts';
+import { num, optionCode, usd } from '@/data/format';
 
-const currencyFormatter = (value: number) => `₹${value.toLocaleString('en-IN')}`;
+const currencyFormatter = (value: number) => usd(value);
 
 interface PayoffChartProps {
   strategy: StrategyRecommendation | null;
@@ -22,7 +23,7 @@ export function PayoffChart({ strategy, leg }: PayoffChartProps) {
 
   const chartData = leg?.payoffPoints ?? strategy?.payoffPoints ?? [];
   const label = leg
-    ? `${leg.action === 'SELL' ? 'Short' : 'Long'} ${leg.strike} ${leg.optionType === 'CALL' ? 'CE' : 'PE'}`
+    ? `${leg.action === 'SELL' ? 'Short' : 'Long'} ${leg.strike} ${optionCode(leg.optionType)}`
     : strategy?.name ?? 'Select a strategy';
 
   return (
@@ -53,7 +54,7 @@ export function PayoffChart({ strategy, leg }: PayoffChartProps) {
               </defs>
               <XAxis
                 dataKey="price"
-                tickFormatter={(value) => value.toLocaleString('en-IN')}
+                tickFormatter={(value) => num(value)}
                 stroke="#94a3b8"
               />
               <YAxis
@@ -62,7 +63,7 @@ export function PayoffChart({ strategy, leg }: PayoffChartProps) {
               />
               <Tooltip
                 formatter={(value: number) => currencyFormatter(value)}
-                labelFormatter={(label) => `Price: ₹${label.toLocaleString('en-IN')}`}
+                labelFormatter={(label) => `SPX ${num(label)}`}
                 contentStyle={{
                   backgroundColor: '#0f172a',
                   borderRadius: '1rem',

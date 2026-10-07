@@ -1,10 +1,12 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { LiveQuoteProvider } from '@/components/LiveQuoteProvider';
+import { NavBar } from '@/components/NavBar';
 
 export const metadata: Metadata = {
   title: 'Quantisti Strategy Dashboard',
-  description: 'Weekly Nifty options intelligence with ML-powered forecasts and strategy recommendations.'
+  description: 'SPX options intelligence with ML-powered forecasts and strategy recommendations.'
 };
 
 export default function RootLayout({
@@ -21,7 +23,10 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <LiveQuoteProvider>
+            <NavBar />
+            {children}
+          </LiveQuoteProvider>
         </ThemeProvider>
       </body>
     </html>

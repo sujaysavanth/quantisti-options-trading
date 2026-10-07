@@ -1,5 +1,5 @@
 """API routers for Market service."""
 
-from . import health, nifty, options
+from . import health, options, underlying
 
-__all__ = ["health", "nifty", "options"]
+__all__ = ["health", "options", "underlying"]

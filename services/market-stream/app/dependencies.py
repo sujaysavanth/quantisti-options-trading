@@ -1,6 +1,6 @@
 "# Dependencies for FastAPI routes."
 
-from fastapi import Depends, Request
+from fastapi import Request
 
 from .broadcaster import QuoteBroadcaster
 from .storage import QuoteStore
