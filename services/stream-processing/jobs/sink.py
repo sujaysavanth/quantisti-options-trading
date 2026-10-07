@@ -78,6 +78,11 @@ UPSERT_RATES = """
     ON CONFLICT (date) DO UPDATE SET rate = EXCLUDED.rate
 """
 
+UPSERT_INDEX = """
+    INSERT INTO index_daily (symbol, date, close, source) VALUES %s
+    ON CONFLICT (symbol, date) DO UPDATE SET close = EXCLUDED.close, source = EXCLUDED.source, updated_at = now()
+"""
+
 # Annualised close-to-close vol over the last 30 log returns, like scripts/populate_us_data.py
 # (pandas rolling std = sample std = stddev_samp). Recomputed from `since` on; the 90-day lookback
 # gives the first recomputed rows a full window. Rows without 30 returns behind them are left alone.
@@ -149,7 +154,9 @@ def write_bars(conn, rows: Sequence[tuple]) -> int:
     return len(rows)
 
 
-def write_daily(conn, underlying: Sequence[tuple], vix: Sequence[tuple], rates: Sequence[tuple]) -> int:
+def write_daily(conn, underlying: Sequence[tuple], vix: Sequence[tuple], rates: Sequence[tuple],
+                index: Sequence[tuple] = ()) -> int:
+    """`index` rows: (symbol, date, close, source). A history backfill sends thousands at once."""
     with conn.cursor() as cur:
         if underlying:
             execute_values(cur, UPSERT_UNDERLYING, underlying)
@@ -159,7 +166,9 @@ def write_daily(conn, underlying: Sequence[tuple], vix: Sequence[tuple], rates: 
             execute_values(cur, UPSERT_VIX, vix)
         if rates:
             execute_values(cur, UPSERT_RATES, rates)
-    return len(underlying) + len(vix) + len(rates)
+        if index:
+            execute_values(cur, UPSERT_INDEX, index, page_size=1000)
+    return len(underlying) + len(vix) + len(rates) + len(index)
 
 
 def _earliest_per_symbol(rows: Iterable[tuple]):

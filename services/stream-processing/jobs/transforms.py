@@ -124,6 +124,17 @@ def daily_frames(valid: DataFrame) -> Tuple[DataFrame, DataFrame, DataFrame]:
     return underlying, vix, rates
 
 
+def index_frame(valid: DataFrame) -> DataFrame:
+    """daily.v1 rows of dataset 'index' (VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y) -> index_daily shaped
+    (symbol, date, close, source), newest message per symbol and day."""
+    p = valid.select("produced_at", "source", "payload.*")
+    return latest(
+        p.where((F.col("dataset") == "index") & F.col("symbol").isNotNull() & F.col("date").isNotNull()
+                & F.col("close").isNotNull()),
+        ["symbol", "date"], "produced_at",
+    ).select("symbol", "date", "close", "source")
+
+
 CONTRACT_KEY = ["symbol", "snapshot_date", "expiry_date", "strike", "option_type", "source"]
 
 

@@ -91,3 +91,22 @@ def test_daily_split_and_newest_message_per_day(kafka_df):
     assert [tuple(r) for r in underlying.collect()] == [("SPX", date(2026, 10, 2), 1.0, 2.0, 0.5, 1.6, 12)]
     assert [tuple(r) for r in vix.collect()] == [(date(2026, 10, 2), 16.4)]
     assert [tuple(r) for r in rates.collect()] == [(date(2026, 10, 1), 0.0412)]
+
+
+def test_index_rows_newest_message_per_symbol_and_day(kafka_df):
+    from jobs.transforms import index_frame
+
+    def index_msg(symbol, day, close, produced_at="2026-10-06T21:00:00Z", source="cboe"):
+        return {"schema": "daily.v1", "source": source, "delay_minutes": 0, "produced_at": produced_at,
+                "payload": {"dataset": "index", "symbol": symbol, "date": day, "close": close}}
+
+    batch = kafka_df(
+        index_msg("VIX9D", "2026-10-05", 12.4),
+        index_msg("VIX9D", "2026-10-05", 12.6, produced_at="2026-10-07T21:00:00Z"),   # a later resend wins
+        index_msg("BAA10Y", "2026-10-05", 1.46, source="fred"),
+        index_msg("VVIX", "2026-10-05", None),                                     # no close: dropped
+        daily_msg("vix", "2026-10-05", close=16.4),                                # other datasets ignored
+    )
+    valid, _ = parse_envelopes(batch, DAILY_PAYLOAD, "daily.v1")
+    rows = sorted(tuple(r) for r in index_frame(valid).collect())
+    assert rows == [("BAA10Y", date(2026, 10, 5), 1.46, "fred"), ("VIX9D", date(2026, 10, 5), 12.6, "cboe")]

@@ -3,7 +3,7 @@
 Four independent queries, each with its own checkpoint (the Kafka offsets it has
 committed to Postgres):
 
-    daily     market.daily          -> underlying_daily / vix_daily / rates_daily
+    daily     market.daily          -> underlying_daily / vix_daily / rates_daily / index_daily
     chain     options.chain.quotes  -> option_chain_snapshots
     bars_1m   market.bars.1m        -> intraday_bars, bars stored as published (no watermark:
                                        late or replayed bars still land; the upsert makes repeats harmless)
@@ -25,8 +25,8 @@ from pyspark.sql import functions as F
 from jobs.dlq import send_to_dlq
 from jobs.schemas import BAR_PAYLOAD, CHAIN_PAYLOAD, DAILY_PAYLOAD
 from jobs.sink import write_bars, write_chain, write_daily
-from jobs.transforms import (chain_rows, daily_frames, five_minute_bars, latest_bars, parse_envelopes,
-                             validate_bars)
+from jobs.transforms import (chain_rows, daily_frames, five_minute_bars, index_frame, latest_bars,
+                             parse_envelopes, validate_bars)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("stream")
@@ -50,14 +50,16 @@ def handle_daily(batch: DataFrame, batch_id: int) -> None:
     try:
         valid, rejected = parse_envelopes(batch, DAILY_PAYLOAD, "daily.v1")
         underlying, vix, rates = daily_frames(valid)
-        # A daily batch is a few dozen rows, so collecting to the driver is fine.
-        # A large deployment would write per partition (foreachPartition) instead.
+        # A daily batch is a few dozen rows (a history backfill a few tens of thousands), so collecting
+        # to the driver is fine. A large deployment would write per partition (foreachPartition) instead.
         u = [tuple(r) for r in underlying.collect()]
         v = [tuple(r) for r in vix.collect()]
         ra = [tuple(r) for r in rates.collect()]
-        _upsert(write_daily, u, v, ra)
+        ix = [tuple(r) for r in index_frame(valid).collect()]
+        _upsert(write_daily, u, v, ra, ix)
         bad = send_to_dlq(rejected, "daily", "market.daily", BOOTSTRAP)
-        log.info("daily batch %d: %d underlying, %d vix, %d rates, %d to DLQ", batch_id, len(u), len(v), len(ra), bad)
+        log.info("daily batch %d: %d underlying, %d vix, %d rates, %d index, %d to DLQ",
+                 batch_id, len(u), len(v), len(ra), len(ix), bad)
     finally:
         batch.unpersist()
 

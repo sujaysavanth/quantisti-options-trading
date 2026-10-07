@@ -10,6 +10,7 @@ or run the Kafka producers once.
     python -m app.cli poll-once --daily --bootstrap localhost:9094     # from your machine
     python -m app.cli backfill-intraday --max                          # all the intraday history Yahoo still has
     python -m app.cli backfill-intraday --days 5 --interval 1m --symbol SPX
+    python -m app.cli backfill-daily --indexes --since 2010-01-01      # VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y
     python -m app.cli scan-gaps --dry-run                              # print gaps, change nothing
     python -m app.cli scan-gaps                                        # same as POST /v1/gaps/scan
 """
@@ -105,6 +106,27 @@ def backfill_intraday(args) -> None:
     print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
 
 
+def backfill_daily(args) -> None:
+    """Index history through market.daily, the same path live end-of-day rows take."""
+    from .producers.daily import DailyPoller
+    from .producers.kafka import Publisher
+    from .sources.indexes import BY_SYMBOL, INDEX_SERIES
+
+    series = [BY_SYMBOL[s] for s in args.symbol.split(",")] if args.symbol else list(INDEX_SERIES)
+    publisher = Publisher(args.bootstrap)
+    if error := publisher.ping():
+        raise SystemExit(f"Kafka at {args.bootstrap} is not reachable: {error}")
+    poller = DailyPoller(publisher)
+    end = date.today()
+    for s in series:
+        sent = poller.publish_indexes(args.since, end, datetime.now(timezone.utc), series=[s])
+        print(f"{s.symbol:7} {s.source:5} {args.since} .. {end}: "
+              + (f"FAILED {poller.index_errors[s.symbol]}" if s.symbol in poller.index_errors else f"{sent:,} rows"))
+        publisher.flush(60)
+    left = publisher.flush(120)
+    print(f"delivered {dict(publisher.delivered)}  failed {dict(publisher.failed)}  undelivered {left}")
+
+
 def scan_gaps(args) -> None:
     from collections import Counter
 
@@ -171,6 +193,13 @@ def main(argv=None) -> None:
     p.add_argument("--symbol", default="SPX,VIX", help="comma-separated: SPX,VIX")
     p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
     p.set_defaults(run=backfill_intraday)
+
+    p = sub.add_parser("backfill-daily", help="publish index history (VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y) to Kafka")
+    p.add_argument("--indexes", action="store_true", required=True, help="the index series (the only dataset for now)")
+    p.add_argument("--since", type=date.fromisoformat, default=date(2010, 1, 1))
+    p.add_argument("--symbol", help="comma-separated subset, e.g. VIX9D,BAA10Y")
+    p.add_argument("--bootstrap", default=settings.KAFKA_BOOTSTRAP, help="localhost:9094 from your machine")
+    p.set_defaults(run=backfill_daily)
 
     p = sub.add_parser("scan-gaps", help="find missing data; request backfills (or only print with --dry-run)")
     p.add_argument("--dry-run", action="store_true", help="print the gaps; write nothing, publish nothing")

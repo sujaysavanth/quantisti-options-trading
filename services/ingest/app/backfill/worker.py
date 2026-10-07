@@ -23,6 +23,7 @@ from ..gaps.expected import in_source_window
 from ..producers.envelope import BackfillPayload, DailyPayload, wrap
 from ..producers.kafka import TOPIC_DAILY, Publisher
 from ..sources import cboe, fred, yahoo
+from ..sources.indexes import BY_SYMBOL, fetch_index
 from ..sources.session import session_for
 from .intraday import Range, backfill_range
 
@@ -41,10 +42,12 @@ class Worker:
                  fetch_spx: Callable = yahoo.fetch_daily,
                  fetch_vix: Callable = cboe.fetch_vix_history,
                  fetch_rates: Callable = fred.fetch_rates,
+                 fetch_index: Callable = fetch_index,
                  fill_intraday: Callable = backfill_range,
                  poll_chain: Optional[Callable[[], int]] = None):
         self._publisher = publisher
         self._fetch_spx, self._fetch_vix, self._fetch_rates = fetch_spx, fetch_vix, fetch_rates
+        self._fetch_index = fetch_index
         self._fill_intraday = fill_intraday
         self._poll_chain = poll_chain       # ChainPoller(...).poll_once(force=True); injected by the consumer
 
@@ -73,6 +76,17 @@ class Worker:
                 for r in rows:
                     self._daily("fred", DailyPayload(dataset="rates", symbol="DGS3MO", date=r.date, rate=r.rate), now)
                 return Outcome("published", len(rows)) if rows else Outcome("failed", detail=f"FRED has no rate for {d}")
+
+            if req.dataset == "index":
+                series = BY_SYMBOL.get(req.symbol)
+                if series is None:
+                    return Outcome("failed", detail=f"unknown index {req.symbol!r}")
+                rows = self._fetch_index(series, d, d)
+                for r in rows:
+                    self._daily(series.source, DailyPayload(dataset="index", symbol=r.symbol, date=r.date,
+                                                            close=r.close), now)
+                return (Outcome("published", len(rows)) if rows
+                        else Outcome("failed", detail=f"{series.source.upper()} has no {req.symbol} value for {d}"))
 
             if req.dataset == "intraday":
                 symbol, _, interval = req.symbol.partition(":")

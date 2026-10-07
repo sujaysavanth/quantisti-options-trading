@@ -7,7 +7,9 @@ the current time, and returns the gaps. Rules per dataset:
 - VIX:        the same, except the latest session (CBOE's history file can lag a day).
 - rates:      only runs of more than RATES_MAX_RUN missing sessions; FRED posts late and
               the bond market closes on some NYSE sessions (Columbus Day, Veterans Day).
-- intraday:   per symbol and bar size, only sessions Yahoo still serves; a session with
+- index:      each series in sources/indexes.py from its start date, by its gap_rule: CBOE series
+              like VIX, FRED series like rates.
+- intraday:  per symbol and bar size, only sessions Yahoo still serves; a session with
               fewer than 98% of its bars is a gap (see expected.py).
 - chain:      the OptionsDX years (2010-2023) and every session since live collection began.
               The years in between have no free source; they are KNOWN, not gaps.
@@ -21,6 +23,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Set, Tuple
 
+from ..sources.indexes import INDEX_SERIES
 from .expected import closed_sessions, expected_bars, in_source_window, min_bars
 
 DAILY_START = date(2010, 1, 4)          # first session in underlying_daily / vix_daily / rates_daily
@@ -57,6 +60,7 @@ class Coverage:
     bars: Dict[Tuple[str, str], Dict[date, int]] = field(default_factory=dict)   # (symbol, interval) -> bars per session
     chain: Set[date] = field(default_factory=set)
     collection_start: Optional[date] = None   # first chain session not from OptionsDX
+    indexes: Dict[str, Set[date]] = field(default_factory=dict)   # index_daily: symbol -> dates stored
 
 
 # Edit this list when the data changes (e.g. a missing OptionsDX month gets downloaded and imported).
@@ -100,6 +104,17 @@ def find_gaps(cov: Coverage, now: datetime) -> List[Gap]:
     for run in _missing_runs(sessions, cov.rates):
         if len(run) > RATES_MAX_RUN:
             gaps += [Gap("rates", "DGS3MO", d, f"rate missing {len(run)} sessions in a row") for d in run]
+
+    for series in INDEX_SERIES:
+        have = cov.indexes.get(series.symbol, set())
+        own = [d for d in sessions if d >= series.start]
+        if series.gap_rule == "session":                                    # like VIX: the latest may lag
+            gaps += [Gap("index", series.symbol, d, f"no {series.symbol} close") for d in own[:-1] if d not in have]
+        else:                                                               # like rates: only long runs
+            for run in _missing_runs(own, have):
+                if len(run) > RATES_MAX_RUN:
+                    gaps += [Gap("index", series.symbol, d, f"{series.symbol} missing {len(run)} sessions in a row")
+                             for d in run]
 
     for symbol in SYMBOLS:
         for interval in INTERVALS:

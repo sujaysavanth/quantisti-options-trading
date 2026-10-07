@@ -132,3 +132,11 @@ def test_copy_chain_matches_the_row_upsert(conn):
     copy_chain(conn, [chain_row(10.0, quoted_at=QUOTED - timedelta(days=1))])   # older capture: ignored
     assert float(snapshot(conn)[0][1]) == 40.5
     assert copy_chain(conn, []) == 0
+
+
+def test_index_rows_upsert(conn):
+    write_daily(conn, [], [], [], [("TESTIDX", DAY, 12.4, "cboe")])
+    write_daily(conn, [], [], [], [("TESTIDX", DAY, 12.6, "cboe")])                # same day again: replaced
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*), max(close) FROM index_daily WHERE symbol = 'TESTIDX'")
+        assert cur.fetchone() == (1, 12.6)

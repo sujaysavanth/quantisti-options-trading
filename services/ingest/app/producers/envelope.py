@@ -56,10 +56,11 @@ class ChainPayload(BaseModel):
 
 
 class DailyPayload(BaseModel):
-    """One day of one daily dataset: an SPX OHLCV bar, a VIX close, or a T-bill rate."""
+    """One day of one daily dataset: an SPX OHLCV bar, a VIX close, a T-bill rate, or an index close
+    (VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y: app/sources/indexes.py)."""
 
-    dataset: Literal["underlying", "vix", "rates"]
-    symbol: str                             # SPX, VIX, DGS3MO
+    dataset: Literal["underlying", "vix", "rates", "index"]
+    symbol: str                             # SPX, VIX, DGS3MO, or an index symbol
     date: date
     open: Optional[float] = None
     high: Optional[float] = None
@@ -70,7 +71,7 @@ class DailyPayload(BaseModel):
 
     @model_validator(mode="after")
     def _fields_for_dataset(self):
-        needed = {"underlying": ("open", "high", "low", "close"), "vix": ("close",), "rates": ("rate",)}[self.dataset]
+        needed = {"underlying": ("open", "high", "low", "close"), "vix": ("close",), "rates": ("rate",), "index": ("close",)}[self.dataset]
         missing = [f for f in needed if getattr(self, f) is None]
         if missing:
             raise ValueError(f"{self.dataset} row needs {', '.join(missing)}")
@@ -80,7 +81,7 @@ class DailyPayload(BaseModel):
 class BackfillPayload(BaseModel):
     """A request to refill one session of one dataset (from the gap detector to the backfill worker)."""
 
-    dataset: Literal["daily", "vix", "rates", "intraday", "chain"]
+    dataset: Literal["daily", "vix", "rates", "index", "intraday", "chain"]
     symbol: str                             # as in ingest_gaps: SPX, VIX, DGS3MO, "SPX:1m"
     date: date
     attempt: int = Field(ge=1)

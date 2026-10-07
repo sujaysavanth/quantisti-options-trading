@@ -27,6 +27,9 @@ def load_coverage(conn, now: datetime) -> Coverage:
         cov.vix = {r[0] for r in cur.fetchall()}
         cur.execute("SELECT date FROM rates_daily")
         cov.rates = {r[0] for r in cur.fetchall()}
+        cur.execute("SELECT symbol, date FROM index_daily")
+        for symbol, d in cur.fetchall():
+            cov.indexes.setdefault(symbol, set()).add(d)
 
         # Bars per ET session date. Only Yahoo's longest window (1h, ~730 days) matters.
         cur.execute("""
@@ -64,6 +67,8 @@ def is_present(conn, dataset: str, symbol: str, day: date) -> bool:
             cur.execute("SELECT 1 FROM vix_daily WHERE date = %s", (day,))
         elif dataset == "rates":
             cur.execute("SELECT 1 FROM rates_daily WHERE date = %s", (day,))
+        elif dataset == "index":
+            cur.execute("SELECT 1 FROM index_daily WHERE symbol = %s AND date = %s", (symbol, day))
         elif dataset == "chain":
             cur.execute("SELECT 1 FROM option_chain_snapshots WHERE symbol = %s AND snapshot_date = %s LIMIT 1",
                         (symbol, day))

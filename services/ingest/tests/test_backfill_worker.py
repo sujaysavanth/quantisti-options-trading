@@ -189,3 +189,17 @@ def test_unrecoverable_outcome_sets_the_status():
     c, _, conn, connect_db = consumer(("requested", 1, "no chain snapshot"))
     assert c.handle(message("chain", "SPX", "2026-10-02"), connect_db) == "unrecoverable"
     assert conn.executed[-1][1][:2] == ("unrecoverable", "no chain snapshot | attempt 1: no free source for past option chains")
+
+
+def test_index_gap_is_refetched_from_its_source():
+    from app.sources.indexes import IndexValue
+    asked = []
+    w, fake = worker(fetch_index=lambda s, a, b: asked.append((s.symbol, a, b)) or [IndexValue(s.symbol, a, 1.47)])
+    out = w.handle(req("index", "BAA10Y", date(2026, 9, 15)), NOW)
+    assert (out.kind, out.sent, asked) == ("published", 1, [("BAA10Y", date(2026, 9, 15), date(2026, 9, 15))])
+    topic, key, msg = fake.sent[0]
+    assert (topic, key, msg["source"], msg["payload"]["dataset"], msg["payload"]["close"]) == \
+        ("market.daily", "index:BAA10Y", "fred", "index", 1.47)
+    w, _ = worker(fetch_index=lambda s, a, b: [])
+    assert w.handle(req("index", "VVIX", date(2026, 9, 15)), NOW).detail == "CBOE has no VVIX value for 2026-09-15"
+    assert w.handle(req("index", "NOPE", date(2026, 9, 15)), NOW).kind == "failed"

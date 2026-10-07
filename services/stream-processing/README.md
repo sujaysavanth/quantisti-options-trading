@@ -11,7 +11,7 @@ Four independent Structured Streaming queries, one micro-batch every 30 s (`TRIG
 
 | Query | Reads | Writes |
 |---|---|---|
-| `daily` | `market.daily` | `underlying_daily`, `vix_daily`, `rates_daily`; recomputes 30-day historical volatility from the earliest changed day |
+| `daily` | `market.daily` | `underlying_daily`, `vix_daily`, `rates_daily`, `index_daily` (VIX9D, VIX3M, VVIX, SKEW, BAA10Y, T10Y2Y); recomputes 30-day historical volatility from the earliest changed day |
 | `chain` | `options.chain.quotes` | `option_chain_snapshots`, one row per contract per session |
 | `bars_1m` | `market.bars.1m` | `intraday_bars` at the interval each bar was published with (1m, 5m or 1h) |
 | `bars_5m` | `market.bars.1m` | `intraday_bars` 5m rows built from 1m bars (`source = 'agg_1m'`), event-time windows with a 10 min watermark |

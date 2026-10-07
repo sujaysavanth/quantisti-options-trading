@@ -4,6 +4,7 @@ from app import market_spec
 from app.gaps.detector import (DAILY_START, INTERVALS, OPTIONSDX_END, SYMBOLS, Coverage, find_gaps,
                                known_ranges)
 from app.gaps.expected import closed_sessions, expected_bars, in_source_window, min_bars
+from app.sources.indexes import INDEX_SERIES
 
 NOW = datetime(2026, 10, 6, 22, 0, tzinfo=timezone.utc)       # Tue 18:00 ET, after the close
 COLLECTION_START = date(2026, 10, 1)
@@ -18,6 +19,7 @@ def full_coverage(now=NOW) -> Coverage:
         for interval in INTERVALS:
             cov.bars[(symbol, interval)] = {d: expected_bars(d, interval) for d in sessions
                                             if in_source_window(d, interval, now)}
+    cov.indexes = {s.symbol: {d for d in sessions if d >= s.start} for s in INDEX_SERIES}
     return cov
 
 
@@ -102,3 +104,22 @@ def test_known_ranges_end_where_collection_starts():
     synthetic = known_ranges(full_coverage(), NOW.date())[-1]
     assert (synthetic.start, synthetic.end) == (date(2024, 1, 1), COLLECTION_START - timedelta(days=1))
     assert known_ranges(Coverage(), NOW.date())[-1].end == NOW.date()   # nothing collected yet
+
+
+def test_cboe_index_series_follow_the_vix_rule():
+    cov = full_coverage()
+    cov.indexes["VVIX"].discard(date(2026, 10, 6))                          # latest session: may lag
+    assert find_gaps(cov, NOW) == []
+    cov.indexes["VVIX"].discard(date(2026, 9, 15))
+    cov.indexes["VIX9D"] -= {date(2010, 6, 1)}                              # before VIX9D's history starts: fine
+    gaps = find_gaps(cov, NOW)
+    assert keys(gaps) == [("index", "VVIX", date(2026, 9, 15))] and gaps[0].detail == "no VVIX close"
+
+
+def test_fred_index_series_follow_the_rates_rule():
+    cov = full_coverage()
+    three = {date(2026, 9, 14), date(2026, 9, 15), date(2026, 9, 16)}
+    cov.indexes["BAA10Y"] -= three                                           # a bond holiday or FRED lag
+    assert find_gaps(cov, NOW) == []
+    cov.indexes["BAA10Y"].discard(date(2026, 9, 17))
+    assert [g.symbol for g in find_gaps(cov, NOW)] == ["BAA10Y"] * 4

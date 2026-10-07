@@ -82,18 +82,36 @@ class DailyClose:
     close: float
 
 
-def parse_vix_history(text: str, start: Optional[date] = None, end: Optional[date] = None) -> List[DailyClose]:
-    """CBOE's CSV: DATE (MM/DD/YYYY), OPEN, HIGH, LOW, CLOSE. Keeps rows in [start, end]."""
+INDEX_HISTORY_URL = "https://cdn-api.cboe.com/api/global/us_indices/daily_prices/{symbol}_History.csv"
+
+
+def parse_index_history(text: str, start: Optional[date] = None, end: Optional[date] = None) -> List[DailyClose]:
+    """A CBOE index history CSV, DATE as MM/DD/YYYY. Two layouts exist: DATE,OPEN,HIGH,LOW,CLOSE (VIX, VIX9D,
+    VIX3M) and DATE,<SYMBOL> with just the close (VVIX, SKEW). Keeps rows in [start, end]."""
+    reader = csv.DictReader(io.StringIO(text))
+    value_col = "CLOSE" if "CLOSE" in (reader.fieldnames or []) else (reader.fieldnames or ["", ""])[-1]
     rows = []
-    for row in csv.DictReader(io.StringIO(text)):
+    for row in reader:
         day = datetime.strptime(row["DATE"].strip(), "%m/%d/%Y").date()
-        if (start and day < start) or (end and day > end) or not row["CLOSE"].strip():
+        value = (row.get(value_col) or "").strip()
+        if (start and day < start) or (end and day > end) or not value:
             continue
-        rows.append(DailyClose(day, float(row["CLOSE"])))
+        rows.append(DailyClose(day, float(value)))
     return rows
+
+
+parse_vix_history = parse_index_history      # VIX is one of them; the old name stays for existing callers
+
+
+def _get_text(url: str) -> str:
+    return httpx.get(url, headers=HEADERS, timeout=60, follow_redirects=True).raise_for_status().text
+
+
+def fetch_index_history(symbol: str, start: Optional[date] = None, end: Optional[date] = None,
+                        get_text: Callable[[str], str] | None = None) -> List[DailyClose]:
+    return parse_index_history((get_text or _get_text)(INDEX_HISTORY_URL.format(symbol=symbol)), start, end)
 
 
 def fetch_vix_history(start: Optional[date] = None, end: Optional[date] = None,
                       get_text: Callable[[str], str] | None = None) -> List[DailyClose]:
-    get_text = get_text or (lambda url: httpx.get(url, headers=HEADERS, timeout=60, follow_redirects=True).raise_for_status().text)
-    return parse_vix_history(get_text(VIX_HISTORY_URL), start, end)
+    return parse_index_history((get_text or _get_text)(VIX_HISTORY_URL), start, end)

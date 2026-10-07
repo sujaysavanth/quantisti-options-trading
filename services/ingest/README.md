@@ -21,6 +21,10 @@ One image, two containers (`docker-compose.streaming.yml`):
 | SPX daily | Yahoo `^GSPC` | |
 | VIX daily | CBOE `VIX_History.csv` | can lag a day |
 | 3-month T-bill | FRED `DGS3MO` | posts a day or more late |
+| Index series (`app/sources/indexes.py`) | CBOE `VIX9D`, `VIX3M`, `VVIX`, `SKEW` history files; FRED `BAA10Y`, `T10Y2Y` | features for the range forecast, stored in `index_daily` |
+
+FRED's ICE high-yield spread (`BAMLH0A0HYM2`) only serves about 3 years of history (licensing), so the Moody's
+`BAA10Y` spread stands in for credit stress. FRED can take over a minute to answer; requests wait up to 150 s.
 
 Every quote is stamped with the time it was taken (`quoted_at`) and the trading session it belongs to
 (`app/sources/session.py`): quotes taken after 20:15 ET belong to the next day's session (CBOE's overnight hours).
@@ -73,6 +77,7 @@ The detector compares Postgres with the NYSE calendar and records what's missing
 | `daily` (SPX) | every session since 2010-01-04 | no row |
 | `vix` | the same, except the latest session | no row |
 | `rates` | the same | more than 3 sessions missing in a row |
+| `index` (`VIX9D` ...) | each series from its start date | CBOE series as for `vix`, FRED series as for `rates` |
 | `intraday` (`SPX:1m` ...) | only sessions Yahoo still serves at that size | fewer than 98% of the session's bars (390/78/7, or 210/42/4 on early closes) |
 | `chain` | OptionsDX years (2010-2023) and every session since live collection began | no rows |
 
@@ -112,6 +117,7 @@ python -m app.cli fetch-chain --expiries 1 --limit 6       # print a chain (no K
 python -m app.cli fetch-bars --symbol SPX --interval 1m --days 1
 python -m app.cli poll-once --all --force                  # run the pollers once, even outside market hours
 python -m app.cli backfill-intraday --max                  # all the intraday history Yahoo still has
+python -m app.cli backfill-daily --indexes --since 2010-01-01   # index series history (~25k rows via market.daily)
 python -m app.cli scan-gaps --dry-run                      # print gaps; changes nothing
 python -m app.cli scan-gaps                                # same as POST /v1/gaps/scan
 ```
