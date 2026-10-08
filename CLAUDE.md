@@ -39,10 +39,10 @@ Tests: pytest suites in `services/{market,simulator,ml,ingest}/tests` (calendar,
 Frontends (Node, independent npm projects):
 ```bash
 cd landing && npm install && npm run dev            # marketing site, :3000 (Next 15 / React 19)
-cd services/strategy-dashboard && npm install && npm run dev   # trading dashboard (Next 14 / React 18, Recharts)
+cd services/strategy-dashboard && npm install && npm run dev   # trading dashboard (Next 14 / React 18, Recharts); npm test = vitest
 npm run build / npm run lint                        # in either app
 ```
-The dashboard reads `NEXT_PUBLIC_SIMULATOR_API` (default `http://localhost:8082`) and `NEXT_PUBLIC_MARKET_STREAM_API` (default `http://localhost:8090`).
+The dashboard reads `NEXT_PUBLIC_SIMULATOR_API` (default `http://localhost:8082`), `NEXT_PUBLIC_MARKET_STREAM_API` (`:8090`), `NEXT_PUBLIC_ML_API` (`:8085`) and `NEXT_PUBLIC_MARKET_API` (`:8081`).
 
 ## Architecture
 
@@ -64,7 +64,7 @@ Ports: gateway 8080, market 8081, simulator 8082, portfolio 8083, stats 8084, ml
 
 Service conventions: `app/main.py` wires routers; `app/config.py` is a pydantic-settings `Settings` read from env; `app/db/connection.py` holds a psycopg2 connection pool (raw SQL with `RealDictCursor`, no ORM). Services start even if the DB is down and report it via health checks. CORS is `*` everywhere.
 
-**strategy-dashboard** mixes live and mock data: strategies/paper orders come from the simulator API, while the weekly prediction (range, closing estimate, VIX/PCR context) still comes from `data/mockDashboard.ts` because the ML predict endpoint doesn't exist.
+**strategy-dashboard** has no mock data: strategies/paper orders from the simulator, the weekly range forecast + track record from ml (`/v1/predict/weekly`, `/monitoring`), VIX, term structure and put/call ratio from market/ml. Pure maths lives in `data/` with vitest tests: `distribution.ts` (5 quantiles -> distribution by normal-score interpolation; `rescale` re-centres the week's forecast on the live price for the time left, `fractionLeft` in `forecast.ts`), `payoff.ts` (P&L, max profit/loss, breakevens), `greeks.ts` (BSM from leg IVs). Probability of profit / expected P&L are shown only for strategies on the forecast's expiry.
 
 **Schema**: `schema/sql/` numbered files — RBAC (users/roles/permissions/audit, roles Basic/Premium/Admin per `docs/security-rbac.md`), market data, strategies/backtests, paper trading, multi-expiry, `008` NIFTY->SPX conversion, `009` streaming (`intraday_bars`, `ingest_gaps`, `quoted_at`/vendor IV columns on chain snapshots), `010` Yahoo overnight OI fix, `011` `index_daily` (VIX9D/VIX3M/VVIX/SKEW from CBOE, BAA10Y/T10Y2Y from FRED; list in `services/ingest/app/sources/indexes.py`, history via `python -m app.cli backfill-daily --indexes`). `db_apply.sh` re-runs every file, so keep migrations idempotent (seeds are insert-if-missing). Option types are `C`/`P` in strategy/backtest tables but `CALL`/`PUT` in paper trading and market-stream. Two files share the `006_` prefix; order is alphabetical.
 

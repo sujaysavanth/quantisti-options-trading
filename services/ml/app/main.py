@@ -17,6 +17,7 @@ import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db.connection import close_db_connection, initialize_pool
@@ -51,6 +52,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ML Service", version="0.2.0", lifespan=lifespan)
+# The dashboard calls this service from the browser (another origin); "*" like the other services, for development.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(health.router, prefix="/health")
 app.include_router(features.router, prefix="/v1")
 app.include_router(predict.router, prefix="/v1")

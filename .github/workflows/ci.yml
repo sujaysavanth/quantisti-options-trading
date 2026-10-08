@@ -108,6 +108,9 @@ jobs:
       - name: Install
         working-directory: ${{ matrix.app }}
         run: npm ci
+      - name: Unit tests
+        working-directory: ${{ matrix.app }}
+        run: npm test --if-present
       - name: Build (includes the TypeScript type check)
         working-directory: ${{ matrix.app }}
         run: npm run build
