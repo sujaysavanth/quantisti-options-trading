@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from datetime import date
 from typing import Optional
 
+import psycopg2.extensions
+
 from ..dataset import store
 from ..dataset.features import CORE_FEATURES, FEATURE_VERSION, MODEL_FEATURES, OPTION_FEATURES
 from ..db.connection import get_db_connection, return_db_connection
@@ -17,7 +19,10 @@ SUPPORTED_SYMBOLS = ("SPX",)
 
 @contextmanager
 def _connection():
+    """A pooled connection with plain (tuple) cursors by default, as app/dataset/ expects. The pool hands out
+    connections whose default cursor returns dicts; code that wants dicts asks for RealDictCursor explicitly."""
     conn = get_db_connection()
+    conn.cursor_factory = psycopg2.extensions.cursor
     try:
         yield conn
         conn.commit()

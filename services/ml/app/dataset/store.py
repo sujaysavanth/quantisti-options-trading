@@ -140,6 +140,42 @@ def read_latest(conn, symbol: str) -> Optional[dict]:
         return cur.fetchone()
 
 
+FORECAST_COLUMNS = ("anchor_date", "expiry_date", "method", "role", "origin", "spot", "vix_close",
+                    "q05", "q10", "q50", "q90", "q95", "trained_through", "details")
+
+
+def save_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
+    """Insert forecasts; an anchor + method that already has one is left as it was (forecasts are made once)."""
+    rows = [tuple(_clean(v) for v in (symbol, *r)) for r in forecasts[list(FORECAST_COLUMNS)].itertuples(index=False)]
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        # RETURNING + fetch: cur.rowcount would only count execute_values' last page of 100 rows
+        inserted = execute_values(cur, f"""
+            INSERT INTO weekly_forecasts (symbol, {", ".join(FORECAST_COLUMNS)}) VALUES %s
+            ON CONFLICT (symbol, anchor_date, method) DO NOTHING RETURNING 1""", rows, fetch=True)
+        return len(inserted)
+
+
+def forecast_anchors(conn, symbol: str = SYMBOL) -> set:
+    """Anchors that already have a forecast from every method."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT anchor_date FROM weekly_forecasts WHERE symbol = %s GROUP BY anchor_date
+                       HAVING count(*) >= 3""", (symbol,))
+        return {r[0] for r in cur.fetchall()}
+
+
+def read_forecasts(conn, symbol: str = SYMBOL, anchor: Optional[date] = None) -> pd.DataFrame:
+    """Stored forecasts with their outcomes (close_ret is empty until the following week has closed)."""
+    where, params = ("AND f.anchor_date = %s", (symbol, anchor)) if anchor else ("", (symbol,))
+    return _frame(conn, f"""
+        SELECT f.*, l.close_ret
+        FROM weekly_forecasts f
+        LEFT JOIN weekly_labels l ON l.symbol = f.symbol AND l.anchor_date = f.anchor_date
+        WHERE f.symbol = %s {where}
+        ORDER BY f.anchor_date, f.method""", params)
+
+
 CHAIN_COLUMNS = ["anchor_date", "expiry_date", "source", "strike", "option_type", "bid", "ask",
                  "vendor_iv", "vendor_delta", "volume", "open_interest", "underlying_price"]
 

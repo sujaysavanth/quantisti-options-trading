@@ -102,6 +102,43 @@ python -m app.cli freeze --model gbm_quantile --groups vix,vix_term,support_resi
 python -m app.cli holdout                  # the frozen choice on 2021 onwards, once -> holdout.md
 ```
 
+## The decision and what is served
+
+Frozen before the holdout (`model_choice.json`): `gbm_sigma` on the VIX, option and VIX term-structure groups,
+compared with GARCH, with the rule "ship only if the holdout shows it significantly better (Diebold-Mariano
+p < 0.05), otherwise serve GARCH". Holdout, 2021 to Sep 2026, run once: pinball 0.394 vs GARCH 0.393 (+0.3%,
+p = 0.58). So:
+
+| Role | Method | Why |
+|---|---|---|
+| `served` | GARCH(1,1) | the rule |
+| `second_opinion` | `gbm_sigma` (refitted weekly) | same average accuracy; covered stressed weeks far better on the holdout (84% vs 76%) |
+| `reference` | raw VIX | VIX as published, before calibration (its ranges run ~12% too wide) |
+
+## Serving and monitoring (`app/forecasting/serving.py`, `monitoring.py`, `scheduler.py`)
+
+Each week's forecast is made once, at the close of the week's last session, from the weeks whose outcome was known
+by then, and stored in `weekly_forecasts` (migration 005); it is never recomputed. A background thread in the
+service forecasts each new week about 45 minutes after its Friday close (`FORECAST_SCHEDULER_ENABLED`). The
+2021-2026 walk-forward forecasts are stored too (origin `backfill`) so monitoring has a track record.
+
+Monitoring compares stored forecasts with outcomes over the last 26 and 52 weeks: 80% / 90% band coverage, width,
+pinball, coverage by VIX regime, and a drift flag (exact binomial test of the 80% coverage, p < 0.05).
+
+| Endpoint | |
+|---|---|
+| `GET /v1/predict/weekly[?anchor=YYYY-MM-DD]` | served, second opinion and reference: quantiles, price levels, 80% / 90% ranges, median, why GARCH is served, and the outcome once known |
+| `GET /v1/predict/monitoring` | calibration per method and window, alerts, scheduler status |
+| `POST /v1/predict/refresh` | rebuild the dataset and forecast any new week now (idempotent) |
+
+```bash
+python -m app.cli backfill-forecasts       # once: 2021+ forecasts as monitoring history
+python -m app.cli refresh-forecasts        # what the scheduler does after each Friday close
+```
+
+In Docker the service keeps its own MLflow store, `data/ml/mlflow-service.db` (MLflow stores absolute file paths,
+which differ between Windows and the container); set `GIT_COMMIT` before `docker compose up` to stamp its runs.
+
 ## Experiment tracking and the model registry (`app/tracking.py`, `app/registry.py`)
 
 Every `evaluate`, `ablate`, `freeze` and `holdout` run is recorded with MLflow: parameters (models, feature groups,

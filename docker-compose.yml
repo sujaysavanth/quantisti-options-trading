@@ -83,6 +83,14 @@ services:
       - PORT=8085
       - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
       - MARKET_SERVICE_URL=http://market:8081
+      - FORECAST_SCHEDULER_ENABLED=true   # forecast each new week after its Friday close
+      # The service's own MLflow store (the CLI on your machine uses data/ml/mlflow.db): MLflow keeps absolute
+      # file paths, which differ between Windows and the container. Browse with
+      # mlflow ui --backend-store-uri sqlite:///data/ml/mlflow-service.db
+      - MLFLOW_TRACKING_URI=sqlite:////app/data/ml/mlflow-service.db
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}  # stamped on tracked runs: $env:GIT_COMMIT = git rev-parse HEAD before `up`
+    volumes:
+      - ./data/ml:/app/data/ml
     ports:
       - "8085:8085"
     depends_on:

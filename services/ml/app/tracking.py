@@ -27,11 +27,17 @@ os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 
 EXPERIMENT = "spx-weekly-range"
 REGISTERED_MODEL = "spx-weekly-range"
-REPO = Path(__file__).resolve().parents[3]
+def repo_root() -> Optional[Path]:
+    """The checkout this file lives in (the folder with services/), or None inside the service container."""
+    return next((p for p in Path(__file__).resolve().parents if (p / "services").is_dir()), None)
+
+
+REPO = repo_root()
 
 
 def data_dir() -> Path:
-    return (REPO if (REPO / "services").is_dir() else Path.cwd()) / "data" / "ml"
+    """data/ml at the repo root on your machine; /app/data/ml (mounted) in the container."""
+    return (REPO or Path.cwd()) / "data" / "ml"
 
 
 def enabled() -> bool:
@@ -50,6 +56,10 @@ def _setup():
 
 
 def git_state() -> Dict[str, str]:
+    """From the checkout; in the container (no git) from GIT_COMMIT, set at deploy time."""
+    if REPO is None:
+        return {"git_commit": os.getenv("GIT_COMMIT", "unknown")[:12], "git_dirty": "unknown"}
+
     def git(*args):
         try:
             return subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, timeout=10).stdout.strip()

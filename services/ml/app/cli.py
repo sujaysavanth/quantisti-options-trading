@@ -8,6 +8,8 @@
     python -m app.cli ablate --model gbm_sigma                     # which feature groups help (development years)
     python -m app.cli freeze --model gbm_quantile --groups vix,vix_term --conformal --reason "..."
     python -m app.cli holdout                                      # the frozen choice on 2021 on, once
+    python -m app.cli backfill-forecasts                           # 2021+ forecasts as monitoring history
+    python -m app.cli refresh-forecasts                            # forecast any new week now
 
 From your machine add --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti.
 """
@@ -80,8 +82,8 @@ def build_dataset(args) -> None:
 
 def default_reports_dir() -> Path:
     """data/ml/reports at the repo root (git-ignored) when run from a checkout, else under the working directory."""
-    root = Path(__file__).resolve().parents[3]
-    return (root if (root / "services").is_dir() else Path.cwd()) / "data" / "ml" / "reports"
+    from .tracking import data_dir
+    return data_dir() / "reports"
 
 
 def _load(args):
@@ -215,6 +217,20 @@ def holdout(args) -> None:
     print("\nwritten: " + ", ".join(str(p) for p in paths) + f", {periods.CHOICE_FILE}")
 
 
+def backfill_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.backfill(conn)
+    print(f"stored {n} backfilled forecasts (2021 on, walk-forward with yearly refits, origin 'backfill')")
+
+
+def refresh_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        result = serving.refresh(conn, log_fn=print)
+    print(result)
+
+
 def oi_levels(args) -> None:
     """Any day's levels, not just anchors: lets you look at the recorder before the first weekly anchor has OI."""
     from datetime import timedelta
@@ -281,6 +297,14 @@ def main(argv=None) -> None:
     p.add_argument("--reference", default="vix_scaled", help="baseline to beat, e.g. garch+conformal")
     p.add_argument("--reason", default="", help="one line on why (recorded)")
     p.set_defaults(run=freeze)
+
+    p = sub.add_parser("backfill-forecasts", help="store the 2021+ walk-forward forecasts as monitoring history")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=backfill_forecasts)
+
+    p = sub.add_parser("refresh-forecasts", help="rebuild the dataset and forecast any new week (as the scheduler does)")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=refresh_forecasts)
 
     p = sub.add_parser("holdout", help="score the frozen choice on 2021 onwards, once")
     p.add_argument("--database-url", **db)

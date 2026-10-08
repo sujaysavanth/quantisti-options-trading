@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Default underlying symbols
     DEFAULT_SYMBOLS: list = ["SPX"]
 
+    # Forecast the new week automatically after each Friday close (app/forecasting/scheduler.py).
+    FORECAST_SCHEDULER_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True
