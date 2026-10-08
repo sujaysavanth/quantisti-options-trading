@@ -17,7 +17,8 @@ dependencies = [
     "arch>=7.0",                 # GARCH baseline (app/evaluation/baselines.py)
     "scikit-learn>=1.4",         # ridge and gradient-boosted models (app/forecasting/)
     "interpret-core>=0.6",       # explainable boosting machine (EBM)
-    "mlflow>=3.0",               # experiment tracking + model registry, SQLite backend (app/tracking.py, registry.py)
+    "shap>=0.46",                # TreeSHAP explanations of the tree model (app/forecasting/explain.py)
+    "mlflow>=3.0",              # experiment tracking + model registry, SQLite backend (app/tracking.py, registry.py)
 ]
 
 [project.optional-dependencies]

@@ -10,6 +10,7 @@
     python -m app.cli holdout                                      # the frozen choice on 2021 on, once
     python -m app.cli backfill-forecasts                           # 2021+ forecasts as monitoring history
     python -m app.cli refresh-forecasts                            # forecast any new week now
+    python -m app.cli explain-backfill                             # explanations for live forecasts made before ML-6
 
 From your machine add --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti.
 """
@@ -231,6 +232,13 @@ def refresh_forecasts(args) -> None:
     print(result)
 
 
+def explain_backfill(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.explain_missing(conn)
+    print(f"added {n} explanations to live forecasts that had none")
+
+
 def oi_levels(args) -> None:
     """Any day's levels, not just anchors: lets you look at the recorder before the first weekly anchor has OI."""
     from datetime import timedelta
@@ -305,6 +313,10 @@ def main(argv=None) -> None:
     p = sub.add_parser("refresh-forecasts", help="rebuild the dataset and forecast any new week (as the scheduler does)")
     p.add_argument("--database-url", **db)
     p.set_defaults(run=refresh_forecasts)
+
+    p = sub.add_parser("explain-backfill", help="add explanations to live forecasts stored before ML-6")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=explain_backfill)
 
     p = sub.add_parser("holdout", help="score the frozen choice on 2021 onwards, once")
     p.add_argument("--database-url", **db)

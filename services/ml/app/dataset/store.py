@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from . import features as F
 from . import labels as L
@@ -96,6 +96,8 @@ def _clean(value):
     """numpy/NaN -> plain Python for psycopg2."""
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
+    if isinstance(value, dict):
+        return Json(value)
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
@@ -141,11 +143,12 @@ def read_latest(conn, symbol: str) -> Optional[dict]:
 
 
 FORECAST_COLUMNS = ("anchor_date", "expiry_date", "method", "role", "origin", "spot", "vix_close",
-                    "q05", "q10", "q50", "q90", "q95", "trained_through", "details")
+                    "q05", "q10", "q50", "q90", "q95", "trained_through", "details", "explanation")
 
 
 def save_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
     """Insert forecasts; an anchor + method that already has one is left as it was (forecasts are made once)."""
+    forecasts = forecasts.assign(**{c: None for c in FORECAST_COLUMNS if c not in forecasts.columns})
     rows = [tuple(_clean(v) for v in (symbol, *r)) for r in forecasts[list(FORECAST_COLUMNS)].itertuples(index=False)]
     if not rows:
         return 0
@@ -155,6 +158,15 @@ def save_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
             INSERT INTO weekly_forecasts (symbol, {", ".join(FORECAST_COLUMNS)}) VALUES %s
             ON CONFLICT (symbol, anchor_date, method) DO NOTHING RETURNING 1""", rows, fetch=True)
         return len(inserted)
+
+
+def save_explanation(conn, anchor: date, method: str, explanation: dict, symbol: str = SYMBOL) -> int:
+    """Store an explanation for a forecast that has none (an existing one is never replaced)."""
+    with conn.cursor() as cur:
+        cur.execute("""UPDATE weekly_forecasts SET explanation = %s
+                       WHERE symbol = %s AND anchor_date = %s AND method = %s AND explanation IS NULL""",
+                    (Json(explanation), symbol, anchor, method))
+        return cur.rowcount
 
 
 def forecast_anchors(conn, symbol: str = SYMBOL) -> set:

@@ -40,6 +40,7 @@ def _block(r: pd.Series) -> dict:
         "median": levels["q50"],
         "range_80": [levels["q10"], levels["q90"]],
         "range_90": [levels["q05"], levels["q95"]],
+        "explanation": r.get("explanation") if isinstance(r.get("explanation"), dict) else None,
     }
 
 

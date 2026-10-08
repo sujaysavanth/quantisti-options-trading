@@ -5,6 +5,7 @@ import { useLiveQuote } from '@/components/LiveQuoteProvider';
 import { defaultExpiry, expiryLabel, pct, quoteExpiries, type LiveLeg } from '@/data/live';
 import { ForecastPanel } from '@/components/ForecastPanel';
 import { MarketContext } from '@/components/MarketContext';
+import { WhyThisRange } from '@/components/WhyThisRange';
 import { PayoffChart } from '@/components/PayoffChart';
 import { GreekStats } from '@/components/GreekStats';
 import { RiskPanel } from '@/components/RiskPanel';
@@ -317,6 +318,8 @@ export default function Page() {
           <ForecastPanel forecast={forecast} monitoring={monitoring} status={forecastStatus} />
           <MarketContext vix={vix} features={features} sentiment={sentiment} />
         </section>
+
+        <WhyThisRange forecast={forecast} />
 
         {feedStatus === 'waiting' ? (
           <section className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 p-10 text-center">

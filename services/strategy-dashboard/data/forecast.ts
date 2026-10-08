@@ -5,7 +5,37 @@ import type { Quantiles } from './distribution';
 export const ML_API = process.env.NEXT_PUBLIC_ML_API ?? 'http://localhost:8085';
 export const MARKET_API = process.env.NEXT_PUBLIC_MARKET_API ?? 'http://localhost:8081';
 
+/** GARCH's exact breakdown of its weekly volatility (ml app/forecasting/explain.py). */
+export type GarchExplanation = {
+  kind: 'garch';
+  sessions: number;
+  sigma: number;                                   // weekly volatility (fraction)
+  sigma_long_run: number;
+  sigma_parts: { long_run: number; last_move: number; carried_over: number };   // add up to sigma
+  last_move_pct: number;                           // the anchor day's return surprise, percent
+  daily_vol_now_annual: number;
+  daily_vol_long_run_annual: number | null;
+  half_life_sessions: number | null;
+};
+
+export type ShapFeature = { name: string; group: string; value: number | null; used: boolean; contribution: number; multiplier: number };
+
+/** TreeSHAP for the tree model: sigma = sigma_base x product of the multipliers. */
+export type TreeExplanation = {
+  kind: 'tree_shap';
+  sigma: number;
+  sigma_base: number;
+  features: ShapFeature[];
+  groups: { group: string; contribution: number; multiplier: number }[];
+};
+
+export type VixExplanation = { kind: 'vix'; vix: number; sessions: number; sigma: number };
+
+/** z: the multipliers that turn sigma into the 5/10/50/90/95% quantiles (learned on the training weeks). */
+export type Explanation = (GarchExplanation | TreeExplanation | VixExplanation) & { z?: number[]; added_later?: boolean };
+
 export type ForecastBlock = {
+  explanation?: Explanation | null;
   method: string;
   origin: string;
   details: string;
