@@ -1,0 +1,95 @@
+{
+  "model": "gbm_sigma",
+  "groups": [
+    "vix",
+    "options",
+    "vix_term"
+  ],
+  "conformal": false,
+  "reference": "garch",
+  "reason": "Ablation kept vix+options+vix_term; trimmed gbm_sigma ties garch/vix_scaled on dev pinball (0.382) with the most even regime coverage (79/82/80%). Conformal not used: no dev gain. DECISION RULE (set before the holdout): ship gbm_sigma only if the holdout shows it significantly better than garch (one-sided Diebold-Mariano p < 0.05); otherwise serve garch and report the regime calibration as a secondary finding.",
+  "development": {
+    "overall": {
+      "n": 366,
+      "coverage_80": 0.8032786885245902,
+      "coverage_90": 0.8907103825136612,
+      "width_80": 0.04695177971151767,
+      "pinball": 0.0038246020576882572,
+      "winkler_80": 0.07177627934439039
+    },
+    "significance": {
+      "vix_scaled": {
+        "n": 366,
+        "mean_diff": -6.845013042272784e-07,
+        "relative": -0.0001789411835351661,
+        "stat": -0.01185542581084544,
+        "p_value": 0.49527048018203634
+      },
+      "garch": {
+        "n": 366,
+        "mean_diff": 6.474556228622284e-07,
+        "relative": 0.00016931571899742859,
+        "stat": 0.005745594565581061,
+        "p_value": 0.5022921479869045
+      }
+    }
+  },
+  "registered_version": "1",
+  "mlflow_run_id": "25dbb8061cbf4f3c842f22ce28845b9e",
+  "frozen_at": "2026-10-08T00:23:15+00:00",
+  "holdout": {
+    "overall": {
+      "gbm_sigma": {
+        "n": 299,
+        "coverage_80": 0.7792642140468228,
+        "coverage_90": 0.8862876254180602,
+        "width_80": 0.05274271319885601,
+        "pinball": 0.003943144929753906,
+        "winkler_80": 0.07191724298168581
+      },
+      "vix_raw": {
+        "n": 299,
+        "coverage_80": 0.9230769230769231,
+        "coverage_90": 0.9765886287625418,
+        "width_80": 0.06733328417022127,
+        "pinball": 0.004114377353142023,
+        "winkler_80": 0.07557801995209365
+      },
+      "vix_scaled": {
+        "n": 299,
+        "coverage_80": 0.7959866220735786,
+        "coverage_90": 0.903010033444816,
+        "width_80": 0.0492987776810928,
+        "pinball": 0.003918815191708086,
+        "winkler_80": 0.07044858198300433
+      },
+      "garch": {
+        "n": 299,
+        "coverage_80": 0.7759197324414716,
+        "coverage_90": 0.8896321070234113,
+        "width_80": 0.05018223594385335,
+        "pinball": 0.003931726484075459,
+        "winkler_80": 0.07151694587345182
+      }
+    },
+    "significance": {
+      "gbm_sigma": {
+        "vix_scaled": {
+          "n": 299,
+          "mean_diff": 2.43297380458199e-05,
+          "relative": 0.006208442311160723,
+          "stat": 0.44186384477677526,
+          "p_value": 0.670706132467705
+        },
+        "garch": {
+          "n": 299,
+          "mean_diff": 1.1418445678446969e-05,
+          "relative": 0.0029041810829656435,
+          "stat": 0.20571324222686307,
+          "p_value": 0.5814925430054738
+        }
+      }
+    },
+    "run_at": "2026-10-08T07:15:04+00:00"
+  }
+}
