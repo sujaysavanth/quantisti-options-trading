@@ -51,8 +51,11 @@ def best_baseline(summary: Dict, names: List[str]) -> str:
 
 
 def development(data, ctx, log: Callable[[str], None] = print,
-                groups: Optional[List[str]] = None) -> Tuple[pd.DataFrame, Dict]:
+                groups: Optional[List[str]] = None, research: bool = False) -> Tuple[pd.DataFrame, Dict]:
     baselines, models = all_baselines(), catalog.all_models(groups)
+    if research:
+        from .chronos2 import contenders              # needs the optional research install (torch)
+        models += contenders()
     log(f"development years {periods.DEV_YEARS.start}-{periods.DEV_YEARS.stop - 1}: "
         f"{len(baselines)} baselines + {len(models)} models on {', '.join(groups or catalog.ALL_GROUPS)}")
     preds = with_conformal(walkforward.run(data, ctx, baselines + models, periods.DEV_YEARS, log=log))
@@ -75,7 +78,26 @@ def run_ablation(data, ctx, model: str = "gbm_sigma", log: Callable[[str], None]
 
 
 def chosen_forecaster(choice: Dict):
+    if choice["model"] == "vix_scaled":              # "no model beats calibrated VIX" is a valid choice too
+        from ..evaluation.baselines import VixScaled
+        return VixScaled()
+    if choice["model"].startswith("chronos2"):
+        from .chronos2 import COVARIATES, Chronos2Forecaster
+        return Chronos2Forecaster(COVARIATES if choice["model"] == "chronos2_cov" else (), name=choice["model"])
     return catalog.build(choice["model"], choice["groups"])
+
+
+def fit_for_registry(data, ctx, choice: Dict, dev_preds: pd.DataFrame):
+    """The frozen forecaster fitted on every development-period week, plus the conformal adjustments learned from
+    its out-of-sample development forecasts: what would have been deployed on the first Friday of the holdout."""
+    from .conformal import regime_adjustments
+    train, _ = walkforward.split(data, periods.HOLDOUT_FIRST_YEAR)
+    forecaster = chosen_forecaster(choice)
+    forecaster.fit(train, ctx)
+    adjustments = None
+    if choice.get("conformal"):
+        adjustments = regime_adjustments(dev_preds[dev_preds["forecaster"] == choice["model"]])
+    return forecaster, adjustments, train
 
 
 def chosen_name(choice: Dict) -> str:

@@ -109,24 +109,33 @@ def evaluate(args) -> None:
     from .evaluation.baselines import all_baselines
     from .forecasting import experiments
 
+    from . import tracking
+
     data, ctx = _load(args)
     if args.models:
         groups = args.groups.split(",") if args.groups else None
-        _, summary = experiments.development(data, ctx, groups=groups)
-        stem = "models_dev" + ("_" + "_".join(groups) if groups else "")
-        paths = report.write(summary, _out(args), stem=stem, title="Models vs baselines: development years",
-                             intro=f"Models use feature groups: {', '.join(summary['groups'])}. Best baseline on these "
-                                   f"years: {summary['best_baseline']}. The holdout years (2021 on) are not in this "
-                                   "report; they are scored once, after `freeze`.")
+        params = {"period": "development", "groups": groups or "all", "research": args.research}
+        with tracking.run("evaluate-models", params, data) as mlf:
+            _, summary = experiments.development(data, ctx, groups=groups, research=args.research)
+            stem = "models_dev" + ("_" + "_".join(groups) if groups else "") + ("_research" if args.research else "")
+            paths = report.write(summary, _out(args), stem=stem, title="Models vs baselines: development years",
+                                 intro=f"Models use feature groups: {', '.join(summary['groups'])}. Best baseline on "
+                                       f"these years: {summary['best_baseline']}. The holdout years (2021 on) are not "
+                                       "in this report; they are scored once, after `freeze`.")
+            tracking.log_summary(mlf, summary)
+            tracking.log_files(mlf, paths)
         print("\n".join(report.table(summary["overall"])))
         print(f"\nbest baseline: {summary['best_baseline']}; significance (one-sided Diebold-Mariano):")
         _print_significance(summary)
     else:
         baselines = all_baselines()
         last_year = max(a.year for a in data["anchor_date"])
-        preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
-        summary = report.summarize(preds, [b.name for b in baselines])
-        paths = report.write(summary, _out(args))
+        with tracking.run("evaluate-baselines", {"first_test_year": args.first_test_year}, data) as mlf:
+            preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
+            summary = report.summarize(preds, [b.name for b in baselines])
+            paths = report.write(summary, _out(args))
+            tracking.log_summary(mlf, summary)
+            tracking.log_files(mlf, paths)
         print("\n".join(report.table(summary["overall"])))
     print("\nwritten: " + ", ".join(str(p) for p in paths))
 
@@ -136,45 +145,70 @@ def ablate(args) -> None:
 
     from .forecasting import ablation, experiments
 
+    from . import tracking
+
     data, ctx = _load(args)
-    steps = experiments.run_ablation(data, ctx, model=args.model)
-    out = _out(args)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "ablation.json").write_text(json.dumps({"model": args.model, "steps": steps}, indent=2, default=str),
-                                       encoding="utf8")
+    with tracking.run("ablate", {"model": args.model, "period": "development"}, data) as mlf:
+        steps = experiments.run_ablation(data, ctx, model=args.model)
+        out = _out(args)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / f"ablation_{args.model}.json"
+        path.write_text(json.dumps({"model": args.model, "steps": steps}, indent=2, default=str), encoding="utf8")
+        if mlf:
+            mlf.log_param("kept_groups", ",".join(ablation.chosen_groups(steps)))
+            for i, step in enumerate(steps):
+                mlf.log_metric("pinball", float(step["pinball"]), step=i)
+            tracking.log_files(mlf, [path])
     print(f"\nkept groups for {args.model}: {', '.join(ablation.chosen_groups(steps))}")
-    print(f"written: {out / 'ablation.json'}")
+    print(f"written: {path}")
 
 
 def freeze(args) -> None:
+    from . import tracking
     from .evaluation import periods
     from .forecasting import experiments
 
     choice = {"model": args.model, "groups": args.groups.split(","), "conformal": args.conformal,
               "reference": args.reference, "reason": args.reason}
     data, ctx = _load(args)
-    _, dev = experiments.score_choice(data, ctx, choice, periods.DEV_YEARS, args.reference)
     name = experiments.chosen_name(choice)
-    choice["development"] = {"overall": dev["overall"][name], "significance": dev["significance"].get(name)}
-    record = periods.freeze(choice)
+    with tracking.run("freeze", {**choice, "period": "development"}, data) as mlf:
+        dev_preds, dev = experiments.score_choice(data, ctx, choice, periods.DEV_YEARS, args.reference)
+        choice["development"] = {"overall": dev["overall"][name], "significance": dev["significance"].get(name)}
+        tracking.log_summary(mlf, dev)
+        if mlf:
+            from .registry import register
+            forecaster, adjustments, train = experiments.fit_for_registry(data, ctx, choice, dev_preds)
+            example = train.drop(columns=[c for c in ("close_ret", "high_ret", "low_ret", "sessions", "next_anchor_date")
+                                          if c in train.columns]).tail(3)
+            choice["registered_version"] = register(mlf, forecaster, choice, adjustments, example)
+            choice["mlflow_run_id"] = mlf.active_run().info.run_id
+        record = periods.freeze(choice)
     print(f"frozen {name} on {', '.join(choice['groups'])} at {record['frozen_at']}: "
-          f"dev pinball {dev['overall'][name]['pinball'] * 100:.3f}, 80% hit {dev['overall'][name]['coverage_80']:.1%}")
+          f"dev pinball {dev['overall'][name]['pinball'] * 100:.3f}, 80% hit {dev['overall'][name]['coverage_80']:.1%}"
+          + (f"; registered as {tracking.REGISTERED_MODEL} v{choice['registered_version']}"
+             if choice.get("registered_version") else ""))
     print(f"written: {periods.CHOICE_FILE}")
 
 
 def holdout(args) -> None:
+    from . import tracking
     from .evaluation import periods, report
     from .forecasting import experiments
 
     choice = periods.holdout_allowed(force=args.force)
     data, ctx = _load(args)
     years = periods.holdout_years(max(a.year for a in data["anchor_date"]))
-    print(f"holdout {years.start}-{years.stop - 1}, frozen choice: {experiments.chosen_name(choice)} "
-          f"on {', '.join(choice['groups'])}")
-    _, summary = experiments.score_choice(data, ctx, choice, years, choice.get("reference"))
     name = experiments.chosen_name(choice)
-    paths = report.write(summary, _out(args), stem="holdout", title="Holdout: the frozen choice, scored once",
-                         intro=f"Frozen choice: {name} on {', '.join(choice['groups'])} (frozen {choice['frozen_at']}).")
+    print(f"holdout {years.start}-{years.stop - 1}, frozen choice: {name} on {', '.join(choice['groups'])}")
+    params = {"model": name, "groups": choice["groups"], "period": "holdout", "forced_rerun": args.force}
+    with tracking.run("holdout", params, data) as mlf:
+        _, summary = experiments.score_choice(data, ctx, choice, years, choice.get("reference"))
+        paths = report.write(summary, _out(args), stem="holdout", title="Holdout: the frozen choice, scored once",
+                             intro=f"Frozen choice: {name} on {', '.join(choice['groups'])} "
+                                   f"(frozen {choice['frozen_at']}).")
+        tracking.log_summary(mlf, summary)
+        tracking.log_files(mlf, paths)
     periods.record_holdout({"overall": summary["overall"], "significance": summary["significance"]})
     print("\n".join(report.table(summary["overall"])))
     _print_significance(summary)
@@ -228,6 +262,7 @@ def main(argv=None) -> None:
     p.add_argument("--database-url", **db)
     p.add_argument("--models", action="store_true", help="baselines + models on the development years (2014-2020)")
     p.add_argument("--groups", help="with --models: feature groups for the models, e.g. vix,options,vix_term")
+    p.add_argument("--research", action="store_true", help="with --models: add Chronos-2 (needs .[research])")
     p.add_argument("--first-test-year", type=int, default=2014, help="baselines only: first test year")
     p.add_argument("--out", help="report folder (default: data/ml/reports at the repo root)")
     p.set_defaults(run=evaluate)
@@ -240,7 +275,7 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("freeze", help="record the development-period choice before the holdout")
     p.add_argument("--database-url", **db)
-    p.add_argument("--model", required=True, choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile"])
+    p.add_argument("--model", required=True, choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile", "chronos2", "chronos2_cov", "vix_scaled"])
     p.add_argument("--groups", required=True, help="comma-separated feature groups, e.g. vix,vix_term,options")
     p.add_argument("--conformal", action="store_true", help="add per-regime conformal calibration")
     p.add_argument("--reference", default="vix_scaled", help="baseline to beat, e.g. garch+conformal")

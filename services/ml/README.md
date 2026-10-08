@@ -102,6 +102,35 @@ python -m app.cli freeze --model gbm_quantile --groups vix,vix_term,support_resi
 python -m app.cli holdout                  # the frozen choice on 2021 onwards, once -> holdout.md
 ```
 
+## Experiment tracking and the model registry (`app/tracking.py`, `app/registry.py`)
+
+Every `evaluate`, `ablate`, `freeze` and `holdout` run is recorded with MLflow: parameters (models, feature groups,
+period), the git commit (and whether the tree had uncommitted changes), the feature version, a fingerprint of the
+data, every score (pinball, coverage overall and per regime, Diebold-Mariano p-values) and the report files.
+Storage is local and git-ignored: `data/ml/mlflow.db` (SQLite) and `data/ml/mlruns`. Set `ML_TRACKING=off` to
+skip it, or `MLFLOW_TRACKING_URI` to use a server.
+
+```bash
+mlflow ui --backend-store-uri sqlite:///data/ml/mlflow.db --port 5050    # from the repo root: http://localhost:5050
+```
+
+`freeze` also fits the chosen forecaster on every development-period week and registers it as
+`spx-weekly-range` (with its per-regime conformal adjustments), which the prediction endpoint will load.
+
+## Research contender: Chronos-2 (`app/forecasting/chronos2.py`)
+
+Amazon's pretrained time-series model, used zero-shot: the weekly return series up to each anchor, alone
+(`chronos2`) or with VIX, VIX9D/VIX, VIX/VIX3M and 20-day realised vol as covariates (`chronos2_cov`). It needs
+PyTorch, so it lives in an optional install that is not in the service image or CI:
+
+```bash
+pip install -e ".[research]"          # torch + chronos-forecasting; the model downloads on first use
+python -m app.cli evaluate --models --groups vix,options,vix_term --research
+```
+
+TabPFN was considered and left out: TabPFN-2.5 is non-commercial, needs a Prior Labs account, and restricts
+competitive benchmarking.
+
 ## Setup
 
 ```bash
