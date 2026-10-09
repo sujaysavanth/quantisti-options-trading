@@ -7,8 +7,12 @@ import { optionCode, usd } from '@/data/format';
 
 interface Props {
   pick: StrategyRecommendation | null;
-  scoredCount: number;
-  forecastExpiry: string | null;
+  /** Why nothing is scored on this expiry, if so. */
+  reason: string | null;
+  /** Which forecast the scores come from. */
+  basis: string | null;
+  /** A same-day expiry with its session under way: the forecast for part of a day isn't validated. */
+  intraday: boolean;
   /** When the option quotes behind the pick were taken. */
   asOf?: string | null;
   selectedName?: string;
@@ -19,7 +23,7 @@ interface Props {
 const etTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' }) + ' ET';
 
-export function RecommendationCard({ pick, scoredCount, forecastExpiry, asOf, selectedName, onSelect }: Props) {
+export function RecommendationCard({ pick, reason, basis, intraday, asOf, selectedName, onSelect }: Props) {
   const f = pick?.forecast;
   return (
     <section className="rounded-3xl border border-primary-200 dark:border-primary-500/30 bg-primary-50/60 dark:bg-primary-500/5 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
@@ -38,7 +42,7 @@ export function RecommendationCard({ pick, scoredCount, forecastExpiry, asOf, se
             </>
           ) : (
             <h2 className="text-2xl font-semibold">
-              {scoredCount === 0 ? 'No strategies on the forecast expiry' : 'Stand aside this week'}
+              {reason ? 'No forecast for this expiry' : 'Stand aside on this expiry'}
             </h2>
           )}
         </div>
@@ -75,16 +79,20 @@ export function RecommendationCard({ pick, scoredCount, forecastExpiry, asOf, se
         </>
       ) : (
         <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-          {scoredCount === 0
-            ? forecastExpiry
-              ? `The forecast covers the ${expiryLabel(forecastExpiry)} expiry. Pick it in the expiry menu to get a recommendation.`
-              : 'A recommendation needs the weekly forecast (ml service).'
+          {reason
+            ? reason
             : 'No defined-risk strategy has a positive expected P&L once the bid/ask is paid. Under this forecast, the option prices are fair or better for the seller of every structure here, so the honest recommendation is no trade.'}
         </p>
       )}
 
+      {intraday && (
+        <p className="mt-3 rounded-xl bg-amber-50 p-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+          Same-day expiry, session under way: the forecast for the rest of today is the 1-day forecast scaled to the
+          time left. Closes are validated, partial days are not (there is no long intraday history to test on).
+        </p>
+      )}
       <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-        How much to trust this: the edge comes from where the forecast disagrees with option prices. In testing
+        {basis ? `Scored with ${basis}. ` : ''}How much to trust this: the edge comes from where the forecast disagrees with option prices. In testing
         (2014-2020), the at-the-money straddle&apos;s own implied range forecast the week better than GARCH (pinball 0.373 vs
         0.382), so that disagreement is not a proven edge. Prices are ~15-minute-delayed mids. Use it for paper trading.
       </p>

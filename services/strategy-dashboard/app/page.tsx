@@ -19,8 +19,8 @@ import { legPl, payoffCurve, payoffStats } from '@/data/payoff';
 import { priceAt, rescale, type QuantileForecast } from '@/data/distribution';
 import { positionGreeks } from '@/data/greeks';
 import {
-  fetchChainSentiment, fetchLatestFeatures, fetchMonitoring, fetchVix, fetchWeekly, fractionLeft,
-  type ChainSentiment, type LatestFeatures, type Monitoring, type VixNow, type WeeklyForecast,
+  conditionExpiry, fetchChainSentiment, fetchExpiries, fetchLatestFeatures, fetchMonitoring, fetchVix, fetchWeekly, fractionLeft,
+  type ChainSentiment, type ExpiryForecasts, type LatestFeatures, type Monitoring, type VixNow, type WeeklyForecast,
 } from '@/data/forecast';
 
 const SIM_API = process.env.NEXT_PUBLIC_SIMULATOR_API ?? 'http://localhost:8082';
@@ -104,6 +104,7 @@ export default function Page() {
 
   const [forecast, setForecast] = useState<WeeklyForecast | null>(null);
   const [monitoring, setMonitoring] = useState<Monitoring | null>(null);
+  const [expiryForecasts, setExpiryForecasts] = useState<ExpiryForecasts | null>(null);
   const [forecastStatus, setForecastStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [features, setFeatures] = useState<LatestFeatures | null>(null);
   const [vix, setVix] = useState<VixNow | null>(null);
@@ -131,6 +132,12 @@ export default function Page() {
       } catch (err) {
         console.error('Weekly forecast unavailable', err);
         setForecastStatus('unavailable');
+      }
+      try {
+        setExpiryForecasts(await fetchExpiries());
+      } catch (err) {
+        console.error('Expiry forecasts unavailable', err);
+        setExpiryForecasts(null);
       }
       try {
         const f = await fetchLatestFeatures();
@@ -215,27 +222,42 @@ export default function Page() {
     return () => clearInterval(id);
   }, [fetchOrders]);
 
-  // Probability of profit and expected P&L under the forecast, for strategies on the forecast's expiry.
-  // The forecast is made at the anchor's close for the whole week; mid-week it is re-centred and narrowed to
-  // the time left (see rescale). Both are taken at the moment of the option quotes, not now: the chain is
-  // ~15 minutes delayed while the index updates every minute, and mixing the two moments makes options look
-  // mispriced by however far SPX moved in between. The centre is that expiry's put-call-parity forward.
+  // Probability of profit and expected P&L for the shown expiry, from its own forecast (GARCH from the latest
+  // close, ml /v1/predict/expiries; the weekly forecast is the fallback for its own expiry). Everything is taken
+  // at the moment of the option quotes, not now: the chain is ~15 minutes delayed while the index updates every
+  // minute, and mixing the two moments makes options look mispriced by however far SPX moved in between. The
+  // centre is that expiry's put-call-parity forward; sessions already traded are removed from the variance.
   const spot = quote?.last_price ?? null;
-  const chainSummary = quote?.expiries?.find((e) => e.expiry === forecast?.expiry_date);
+  const shownExpiry = strategies[0]?.expiry ?? expiry ?? defaultExpiry(quote) ?? null;
+  const chainSummary = quote?.expiries?.find((e) => e.expiry === shownExpiry);
   const chainCentre = chainSummary?.forward ?? null;
   const chainTime = chainSummary?.quoted_at ?? quote?.quoted_at ?? null;
-  const dist = useMemo<QuantileForecast | null>(() => {
-    if (!forecast) return null;
-    const base = { spot: forecast.spot, quantiles: forecast.served.quantiles };
+  const scoring = useMemo(() => {
+    const none = (reason: string | null) => ({ dist: null as QuantileForecast | null, intraday: false, reason, basis: null as string | null });
+    if (!shownExpiry) return none(null);
     const at = chainTime ? new Date(chainTime) : new Date();
-    return rescale(base, chainCentre ?? spot ?? forecast.spot, fractionLeft(forecast.anchor_date, forecast.expiry_date, at));
-  }, [forecast, chainCentre, chainTime, spot]);
+    const centre = chainCentre ?? spot;
+    const ef = expiryForecasts?.expiries.find((e) => e.expiry_date === shownExpiry);
+    if (ef && centre) {
+      const c = conditionExpiry(ef, centre, at);
+      return { ...c, basis: `GARCH from the ${expiryLabel(expiryForecasts!.origin_date)} close, ${ef.sessions}-session horizon` };
+    }
+    if (forecast && shownExpiry === forecast.expiry_date) {
+      const base = { spot: forecast.spot, quantiles: forecast.served.quantiles };
+      const dist = rescale(base, centre ?? forecast.spot, fractionLeft(forecast.anchor_date, forecast.expiry_date, at));
+      return { dist, intraday: false, reason: null, basis: 'the weekly forecast, re-centred for the time left' };
+    }
+    return none(expiryForecasts
+      ? 'No forecast for this expiry: it is more than 10 sessions out.'
+      : 'Forecasts are unavailable (ml service on port 8085).');
+  }, [shownExpiry, chainCentre, chainTime, spot, expiryForecasts, forecast]);
+  const dist = scoring.dist;
 
   const ranking = useMemo(() => {
-    if (!forecast || !dist) return rankStrategies(strategies);
+    if (!dist) return rankStrategies(strategies);
     return rankStrategies(strategies.map((s) =>
-      s.expiry === forecast.expiry_date ? { ...s, forecast: fitStrategy(s, dist, forecast.served.method) } : s));
-  }, [strategies, forecast, dist]);
+      s.expiry === shownExpiry ? { ...s, forecast: fitStrategy(s, dist, 'garch') } : s));
+  }, [strategies, dist, shownExpiry]);
   const { ranked } = ranking;
   // Sticky: a new leader must beat the current pick clearly (stickyPick) before the recommendation changes.
   const lastPick = useRef<string | null>(null);
@@ -248,8 +270,8 @@ export default function Page() {
   const selected = ranked.find((s) => s.name === selectedName) ?? pick ?? ranked[0] ?? null;
   const greeks = useMemo(() => (selected && spot ? positionGreeks(selected.legs, spot) : null), [selected, spot]);
   const range = (lo: number, hi: number): [number, number] => [priceAt(dist!, lo), priceAt(dist!, hi)];
-  const bands = forecast && dist
-    ? { range80: range(0.1, 0.9), range90: range(0.05, 0.95), expiry: forecast.expiry_date }
+  const bands = dist && shownExpiry
+    ? { range80: range(0.1, 0.9), range90: range(0.05, 0.95), expiry: shownExpiry }
     : null;
 
   const handleSelect = (strategy: StrategyRecommendation) => {
@@ -321,7 +343,6 @@ export default function Page() {
                 {expiries.map((e) => (
                   <option key={e.expiry} value={e.expiry}>
                     {expiryLabel(e.expiry)} ({e.dte}d){e.atm_iv ? ` · IV ${pct(e.atm_iv)}` : ''}
-                    {forecast && e.expiry === forecast.expiry_date ? ' · forecast' : ''}
                   </option>
                 ))}
               </select>
@@ -330,7 +351,7 @@ export default function Page() {
         </header>
 
         <section className="grid gap-6 md:grid-cols-2">
-          <ForecastPanel forecast={forecast} monitoring={monitoring} status={forecastStatus} />
+          <ForecastPanel forecast={forecast} monitoring={monitoring} status={forecastStatus} expiries={expiryForecasts} />
           <MarketContext vix={vix} features={features} sentiment={sentiment} />
         </section>
 
@@ -341,8 +362,9 @@ export default function Page() {
             <RecommendationCard
               pick={pick}
               asOf={chainTime}
-              scoredCount={ranked.filter((s) => s.forecast).length}
-              forecastExpiry={forecast?.expiry_date ?? null}
+              reason={scoring.reason}
+              basis={scoring.basis}
+              intraday={scoring.intraday}
               onSelect={handleSelect}
               selectedName={selected?.name}
             />
@@ -351,7 +373,7 @@ export default function Page() {
               pickName={pick?.name}
               selectedStrategy={selected?.name}
               onSelect={handleSelect}
-              forecastExpiry={forecast?.expiry_date}
+              reason={scoring.reason}
             />
           </>
         )}

@@ -17,6 +17,10 @@ can't quietly improve the track record.
 
 Each live forecast is stored with its explanation (app/forecasting/explain.py), made from the same fitted
 models. explain_missing() adds one to live forecasts stored before explanations existed.
+
+Expiry forecasts (horizons.py), daily:
+    refresh_expiries()   after each session's close: GARCH forecasts for every listed expiry within 10 sessions
+    backfill_expiries()  the 2021+ walk-forward (yearly refits) for listed origin/expiry pairs, origin 'backfill'
 """
 
 from __future__ import annotations
@@ -162,6 +166,37 @@ def explain_missing(conn, choice: Optional[Dict] = None, log_fn: Callable[[str],
             done += store.save_explanation(conn, anchor, f.name, ex)
             log_fn(f"explained {anchor} {f.name} (refit matches the stored forecast: {ex['matches_stored']})")
     return done
+
+
+def horizon_data(conn):
+    from .horizons import HorizonData
+    daily, vix, _ = store.load_market(conn)
+    return HorizonData.from_frames(daily, vix)
+
+
+def refresh_expiries(conn, log_fn: Callable[[str], None] = log.info) -> Dict:
+    """Store expiry forecasts for every session close that doesn't have them (normally just today's)."""
+    from .horizons import forecast_origin
+    data = horizon_data(conn)
+    have = store.expiry_origins(conn)
+    sessions = [data.day(i) for i in range(len(data.dates))]
+    todo = [d for d in sessions if d > max(have)] if have else sessions[-1:]
+    stored = 0
+    for day in todo:
+        fc = forecast_origin(data, day)
+        stored += store.save_expiry_forecasts(conn, fc)
+        log_fn(f"expiry forecasts from {day}: " + ", ".join(
+            f"{r.expiry_date} ({r.sessions}d) {r.spot * np.exp(r.q10):,.0f}-{r.spot * np.exp(r.q90):,.0f}" for r in fc.itertuples()))
+    return {"origins": [str(d) for d in todo], "stored": stored}
+
+
+def backfill_expiries(conn, log_fn: Callable[[str], None] = print) -> int:
+    """Walk-forward expiry forecasts for 2021 on (refitted yearly), stored as monitoring history."""
+    from .horizons import backfill_frame, walk_forward
+    data = horizon_data(conn)
+    last_year = pd.Timestamp(data.dates[-1]).year
+    preds = walk_forward(data, periods.holdout_years(last_year), log=log_fn)
+    return store.save_expiry_forecasts(conn, backfill_frame(data, preds))
 
 
 def backfill(conn, choice: Optional[Dict] = None, log_fn: Callable[[str], None] = print) -> int:

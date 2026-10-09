@@ -188,6 +188,39 @@ def read_forecasts(conn, symbol: str = SYMBOL, anchor: Optional[date] = None) ->
         ORDER BY f.anchor_date, f.method""", params)
 
 
+EXPIRY_FORECAST_COLUMNS = ("origin_date", "expiry_date", "sessions", "method", "origin", "spot", "vix_close",
+                           "q05", "q10", "q50", "q90", "q95", "sigma", "z", "variance_path", "path_dates", "trained_through")
+
+
+def save_expiry_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
+    """Insert expiry forecasts; an origin + expiry that already has one is left as it was."""
+    if forecasts.empty:
+        return 0
+    rows = [tuple(_clean(v) for v in (symbol, *r)) for r in forecasts[list(EXPIRY_FORECAST_COLUMNS)].itertuples(index=False)]
+    with conn.cursor() as cur:
+        inserted = execute_values(cur, f"""
+            INSERT INTO expiry_forecasts (symbol, {", ".join(EXPIRY_FORECAST_COLUMNS)}) VALUES %s
+            ON CONFLICT (symbol, origin_date, expiry_date, method) DO NOTHING RETURNING 1""", rows, page_size=1000, fetch=True)
+        return len(inserted)
+
+
+def expiry_origins(conn, symbol: str = SYMBOL) -> set:
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT origin_date FROM expiry_forecasts WHERE symbol = %s", (symbol,))
+        return {r[0] for r in cur.fetchall()}
+
+
+def read_expiry_forecasts(conn, symbol: str = SYMBOL, origin: Optional[date] = None) -> pd.DataFrame:
+    """Stored expiry forecasts with outcomes: close_ret = ln(close at expiry / origin close), empty until then."""
+    where, params = ("AND f.origin_date = %s", (symbol, origin)) if origin else ("", (symbol,))
+    return _frame(conn, f"""
+        SELECT f.*, ln(u.close / f.spot) AS close_ret
+        FROM expiry_forecasts f
+        LEFT JOIN underlying_daily u ON u.symbol = f.symbol AND u.date = f.expiry_date
+        WHERE f.symbol = %s {where}
+        ORDER BY f.origin_date, f.expiry_date""", params)
+
+
 CHAIN_COLUMNS = ["anchor_date", "expiry_date", "source", "strike", "option_type", "bid", "ask",
                  "vendor_iv", "vendor_delta", "volume", "open_interest", "underlying_price"]
 

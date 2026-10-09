@@ -1,0 +1,583 @@
+{
+  "method": "garch",
+  "dev_years": [
+    2014,
+    2020
+  ],
+  "gate_coverage_80": [
+    0.75,
+    0.85
+  ],
+  "frozen_at": "2026-10-09T13:11:47+00:00",
+  "horizons": {
+    "1": {
+      "origins": 1763,
+      "coverage_80": 0.8167895632444696,
+      "coverage_90": 0.9143505388542258,
+      "width_80": 0.022040695008592303,
+      "pinball": 0.0017303183511851745,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8711018711018711
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.757071547420965
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.735
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.7901304594441293,
+        "coverage_90": 0.9069767441860465,
+        "width_80": 0.02029097995308866,
+        "pinball": 0.0017444561907801483
+      },
+      "valid": true
+    },
+    "2": {
+      "origins": 1763,
+      "coverage_80": 0.8309699376063528,
+      "coverage_90": 0.9171866137266024,
+      "width_80": 0.030679968350373822,
+      "pinball": 0.002355919747745377,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8856548856548857
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7737104825291181
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.74
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.8071469086783891,
+        "coverage_90": 0.897334089619966,
+        "width_80": 0.027860577558917694,
+        "pinball": 0.002333419715748442
+      },
+      "valid": true
+    },
+    "3": {
+      "origins": 1763,
+      "coverage_80": 0.8218944980147476,
+      "coverage_90": 0.9171866137266024,
+      "width_80": 0.03748558981479005,
+      "pinball": 0.0029001753963080208,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8783783783783784
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.757071547420965
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.745
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.7963698241633579,
+        "coverage_90": 0.9030062393647192,
+        "width_80": 0.03404162690101375,
+        "pinball": 0.0028654488545566863
+      },
+      "valid": true
+    },
+    "4": {
+      "origins": 1763,
+      "coverage_80": 0.8287010777084515,
+      "coverage_90": 0.9120816789563244,
+      "width_80": 0.04321296544612632,
+      "pinball": 0.003374441006224035,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8898128898128899
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7587354409317804
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.745
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.8122518434486671,
+        "coverage_90": 0.8950652297220647,
+        "width_80": 0.04012717592072329,
+        "pinball": 0.003338758944414775
+      },
+      "valid": true
+    },
+    "5": {
+      "origins": 1763,
+      "coverage_80": 0.8321043675553035,
+      "coverage_90": 0.9081111741349972,
+      "width_80": 0.047896305789075604,
+      "pinball": 0.003748152859594121,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8908523908523909
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7720465890183028
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.73
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.8128190584231424,
+        "coverage_90": 0.8882586500283608,
+        "width_80": 0.044685234532253836,
+        "pinball": 0.003716199753695177
+      },
+      "valid": true
+    },
+    "6": {
+      "origins": 1763,
+      "coverage_80": 0.8196256381168463,
+      "coverage_90": 0.9013045944412933,
+      "width_80": 0.05147260038532472,
+      "pinball": 0.00409142323680715,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8690228690228691
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7703826955074875
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.73
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.8003403289846852,
+        "coverage_90": 0.8831537152580828,
+        "width_80": 0.04776216749517741,
+        "pinball": 0.00405000865476974
+      },
+      "valid": true
+    },
+    "7": {
+      "origins": 1763,
+      "coverage_80": 0.810550198525241,
+      "coverage_90": 0.8967668746454907,
+      "width_80": 0.05458690295150501,
+      "pinball": 0.004379103434765838,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8575883575883576
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7653910149750416
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.72
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.784458309699376,
+        "coverage_90": 0.8865570051049347,
+        "width_80": 0.0507701895935604,
+        "pinball": 0.004327968909738531
+      },
+      "valid": true
+    },
+    "8": {
+      "origins": 1763,
+      "coverage_80": 0.8082813386273398,
+      "coverage_90": 0.8916619398752127,
+      "width_80": 0.0576660120559461,
+      "pinball": 0.004704577803746034,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8534303534303534
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7603993344425957
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.735
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.784458309699376,
+        "coverage_90": 0.8820192853091322,
+        "width_80": 0.053576796323190685,
+        "pinball": 0.004665727639170356
+      },
+      "valid": true
+    },
+    "9": {
+      "origins": 1763,
+      "coverage_80": 0.8014747589336358,
+      "coverage_90": 0.8882586500283608,
+      "width_80": 0.06008395154822002,
+      "pinball": 0.004984437709476191,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8523908523908524
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7470881863560732
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.72
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.7872943845717527,
+        "coverage_90": 0.8848553601815088,
+        "width_80": 0.056076765126722175,
+        "pinball": 0.004929598372336246
+      },
+      "valid": true
+    },
+    "10": {
+      "origins": 1763,
+      "coverage_80": 0.8065796937039138,
+      "coverage_90": 0.8933635847986386,
+      "width_80": 0.0634566975071645,
+      "pinball": 0.005265460674243382,
+      "coverage_80_by_regime": {
+        "calm (VIX < 15)": {
+          "origins": 962,
+          "coverage_80": 0.8565488565488566
+        },
+        "normal (VIX 15-25)": {
+          "origins": 601,
+          "coverage_80": 0.7637271214642263
+        },
+        "stressed (VIX >= 25)": {
+          "origins": 200,
+          "coverage_80": 0.695
+        }
+      },
+      "vix_scaled": {
+        "coverage_80": 0.7912648893930799,
+        "coverage_90": 0.8842881452070335,
+        "width_80": 0.05901108408929987,
+        "pinball": 0.005218700699195642
+      },
+      "valid": true
+    }
+  },
+  "holdout": {
+    "years": [
+      2021,
+      2026
+    ],
+    "horizons": {
+      "1": {
+        "origins": 1447,
+        "coverage_80": 0.7767795438838977,
+        "coverage_90": 0.8845888044229441,
+        "width_80": 0.023061715366363512,
+        "pinball": 0.0018652400633776887,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8181818181818182
+          },
+          "normal (VIX 15-25)": {
+            "origins": 979,
+            "coverage_80": 0.7814096016343207
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.694300518134715
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7975120939875605,
+          "coverage_90": 0.9004837595024188,
+          "width_80": 0.023107399381296963,
+          "pinball": 0.0018416260134354143
+        },
+        "valid": true
+      },
+      "2": {
+        "origins": 1446,
+        "coverage_80": 0.7683264177040111,
+        "coverage_90": 0.892807745504841,
+        "width_80": 0.03196542462923087,
+        "pinball": 0.002619660873929738,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.7963636363636364
+          },
+          "normal (VIX 15-25)": {
+            "origins": 978,
+            "coverage_80": 0.7699386503067485
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7202072538860104
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7752420470262794,
+          "coverage_90": 0.8934993084370678,
+          "width_80": 0.03162750232294992,
+          "pinball": 0.0025936753870810167
+        },
+        "valid": true
+      },
+      "3": {
+        "origins": 1445,
+        "coverage_80": 0.7792387543252595,
+        "coverage_90": 0.8809688581314878,
+        "width_80": 0.03886692766672811,
+        "pinball": 0.0031947381467167433,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8218181818181818
+          },
+          "normal (VIX 15-25)": {
+            "origins": 977,
+            "coverage_80": 0.7809621289662231
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7098445595854922
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7833910034602076,
+          "coverage_90": 0.8885813148788927,
+          "width_80": 0.038732296787617394,
+          "pinball": 0.0031670425994097164
+        },
+        "valid": true
+      },
+      "4": {
+        "origins": 1444,
+        "coverage_80": 0.7832409972299169,
+        "coverage_90": 0.881578947368421,
+        "width_80": 0.04458190600349309,
+        "pinball": 0.003636822861179076,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8145454545454546
+          },
+          "normal (VIX 15-25)": {
+            "origins": 976,
+            "coverage_80": 0.7889344262295082
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7098445595854922
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7818559556786704,
+          "coverage_90": 0.881578947368421,
+          "width_80": 0.04494263590526883,
+          "pinball": 0.0036043082715211073
+        },
+        "valid": true
+      },
+      "5": {
+        "origins": 1443,
+        "coverage_80": 0.7706167706167706,
+        "coverage_90": 0.8814968814968815,
+        "width_80": 0.049391893084697,
+        "pinball": 0.0039885389339765175,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.7818181818181819
+          },
+          "normal (VIX 15-25)": {
+            "origins": 975,
+            "coverage_80": 0.7753846153846153
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7305699481865285
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7900207900207901,
+          "coverage_90": 0.8884268884268884,
+          "width_80": 0.049949825512508636,
+          "pinball": 0.003961989106088855
+        },
+        "valid": true
+      },
+      "6": {
+        "origins": 1442,
+        "coverage_80": 0.7766990291262136,
+        "coverage_90": 0.8841886269070736,
+        "width_80": 0.0535436588964928,
+        "pinball": 0.004338103231839483,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8327272727272728
+          },
+          "normal (VIX 15-25)": {
+            "origins": 974,
+            "coverage_80": 0.7679671457905544
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7409326424870466
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7933425797503467,
+          "coverage_90": 0.8890429958391124,
+          "width_80": 0.05411256599494761,
+          "pinball": 0.004310783209630628
+        },
+        "valid": true
+      },
+      "7": {
+        "origins": 1441,
+        "coverage_80": 0.765440666204025,
+        "coverage_90": 0.8820263705759889,
+        "width_80": 0.057383058629123025,
+        "pinball": 0.004642845552343066,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8327272727272728
+          },
+          "normal (VIX 15-25)": {
+            "origins": 973,
+            "coverage_80": 0.7523124357656732
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7357512953367875
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.78764746703678,
+          "coverage_90": 0.8875780707841776,
+          "width_80": 0.05813411000166732,
+          "pinball": 0.0046093186758445455
+        },
+        "valid": true
+      },
+      "8": {
+        "origins": 1440,
+        "coverage_80": 0.7715277777777778,
+        "coverage_90": 0.8909722222222223,
+        "width_80": 0.06102196548366619,
+        "pinball": 0.004900678340891965,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8
+          },
+          "normal (VIX 15-25)": {
+            "origins": 972,
+            "coverage_80": 0.7716049382716049
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7305699481865285
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7944444444444444,
+          "coverage_90": 0.8784722222222222,
+          "width_80": 0.061668402823969605,
+          "pinball": 0.00488385667097991
+        },
+        "valid": true
+      },
+      "9": {
+        "origins": 1439,
+        "coverage_80": 0.7727588603196665,
+        "coverage_90": 0.886726893676164,
+        "width_80": 0.06355105177982562,
+        "pinball": 0.005180766658702559,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 275,
+            "coverage_80": 0.8072727272727273
+          },
+          "normal (VIX 15-25)": {
+            "origins": 971,
+            "coverage_80": 0.7641606591143152
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7668393782383419
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7866574009728978,
+          "coverage_90": 0.8825573314801946,
+          "width_80": 0.06439037053543759,
+          "pinball": 0.005156383175010735
+        },
+        "valid": true
+      },
+      "10": {
+        "origins": 1438,
+        "coverage_80": 0.7705146036161336,
+        "coverage_90": 0.8824756606397774,
+        "width_80": 0.06700172033839538,
+        "pinball": 0.005448011835924456,
+        "coverage_80_by_regime": {
+          "calm (VIX < 15)": {
+            "origins": 274,
+            "coverage_80": 0.7664233576642335
+          },
+          "normal (VIX 15-25)": {
+            "origins": 971,
+            "coverage_80": 0.776519052523172
+          },
+          "stressed (VIX >= 25)": {
+            "origins": 193,
+            "coverage_80": 0.7461139896373057
+          }
+        },
+        "vix_scaled": {
+          "coverage_80": 0.7899860917941586,
+          "coverage_90": 0.8894297635605007,
+          "width_80": 0.06801886560688745,
+          "pinball": 0.0054396550738242955
+        },
+        "valid": true
+      }
+    },
+    "run_at": "2026-10-09T13:12:00+00:00"
+  }
+}

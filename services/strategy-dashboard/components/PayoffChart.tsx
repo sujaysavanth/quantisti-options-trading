@@ -37,10 +37,8 @@ export function PayoffChart({ strategy, leg, bands, spot }: PayoffChartProps) {
         <div className="text-right text-xs text-slate-500 dark:text-slate-400 max-w-xs">
           {showBands ? (
             <p>
-              Shaded: the forecast&apos;s 80% range (darker) and 90% range for this expiry, re-centred on the live price for the time left.
+              Shaded: this expiry&apos;s forecast 80% range (darker) and 90% range, as of the option prices&apos; time.
             </p>
-          ) : bands && strategy ? (
-            <p>The weekly forecast covers the {bands.expiry} expiry; pick it to see the range here.</p>
           ) : null}
         </div>
       </div>

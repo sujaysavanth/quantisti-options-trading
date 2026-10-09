@@ -159,3 +159,55 @@ export function regimeOf(vix: number): Regime {
   if (vix < 25) return { label: 'normal', description: 'VIX 15-25: typical conditions' };
   return { label: 'stressed', description: 'VIX 25 or higher: wide ranges; calibrated bands matter most here' };
 }
+
+/** One expiry's forecast from the latest close (ml GET /v1/predict/expiries). */
+export type ExpiryForecast = {
+  expiry_date: string;
+  sessions: number;
+  quantiles: Quantiles;
+  range_80: [number, number];
+  range_90: [number, number];
+  sigma: number | null;
+  z: number[] | null;                       // q = sigma * z
+  variance_path: number[] | null;           // each session's variance up to the expiry
+  path_dates: string[] | null;
+  validation: { valid: boolean; reason: string; dev_coverage_80?: number };
+};
+
+export type ExpiryForecasts = { origin_date: string; spot: number; method: string; expiries: ExpiryForecast[] };
+
+export const fetchExpiries = () => get<ExpiryForecasts>(`${ML_API}/v1/predict/expiries`);
+
+export type Conditioned = {
+  dist: { spot: number; quantiles: Quantiles } | null;
+  /** The expiry is today and its session has started: only part of a day is left (not validated). */
+  intraday: boolean;
+  reason: string | null;
+};
+
+/**
+ * An expiry's forecast as of `at` (the option quotes' time), centred on `centre` (that expiry's parity forward).
+ * Sessions already closed drop out of the variance path; today counts for the share of its session still to
+ * trade. The quantiles keep that horizon's multipliers: q = z * sqrt(variance left).
+ */
+export function conditionExpiry(e: ExpiryForecast, centre: number, at: Date): Conditioned {
+  if (!e.validation.valid) return { dist: null, intraday: false, reason: `Not shown: ${e.validation.reason}.` };
+  if (!e.variance_path || !e.path_dates || !e.z) return { dist: null, intraday: false, reason: 'This forecast has no variance path.' };
+  const ny = newYork(at);
+  let left = 0;
+  let intraday = false;
+  e.path_dates.forEach((d, k) => {
+    if (d < ny.date) return;
+    if (d > ny.date || ny.weekend) {
+      left += e.variance_path![k];
+      return;
+    }
+    const share = Math.min(Math.max((16 * 60 - Math.max(ny.minutes, 9 * 60 + 30)) / SESSION_MINUTES, 0), 1);
+    if (share < 1) intraday = d === e.expiry_date;
+    left += e.variance_path![k] * share;
+  });
+  if (left <= 0) return { dist: null, intraday: false, reason: 'This expiry has settled.' };
+  const s = Math.sqrt(left);
+  const [q05, q10, q50, q90, q95] = e.z.map((z) => z * s);
+  return { dist: { spot: centre, quantiles: { q05, q10, q50, q90, q95 } }, intraday, reason: null };
+}

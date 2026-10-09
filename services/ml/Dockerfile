@@ -10,6 +10,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY README.md ./
 COPY model_choice.json ./
+COPY horizons.json ./
 COPY app ./app
 
 RUN pip install --no-cache-dir --upgrade pip \

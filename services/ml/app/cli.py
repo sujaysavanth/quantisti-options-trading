@@ -11,6 +11,9 @@
     python -m app.cli backfill-forecasts                           # 2021+ forecasts as monitoring history
     python -m app.cli refresh-forecasts                            # forecast any new week now
     python -m app.cli explain-backfill                             # explanations for live forecasts made before ML-6
+    python -m app.cli evaluate-horizons [--freeze]                 # expiry forecasts 1-10 sessions, 2014-2020
+    python -m app.cli horizons-holdout                             # the frozen horizons on 2021 on, once
+    python -m app.cli backfill-expiry-forecasts                    # 2021+ expiry forecasts as monitoring history
 
 From your machine add --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti.
 """
@@ -239,6 +242,55 @@ def explain_backfill(args) -> None:
     print(f"added {n} explanations to live forecasts that had none")
 
 
+def evaluate_horizons(args) -> None:
+    from .evaluation import periods
+    from .forecasting import horizons, serving
+    with psycopg2.connect(args.database_url) as conn:
+        data = serving.horizon_data(conn)
+    preds = horizons.walk_forward(data, periods.DEV_YEARS, log=print)
+    result = horizons.evaluate(preds)
+    text = horizons.report(result, "Expiry forecasts by horizon, development years 2014-2020 (GARCH vs calibrated VIX)")
+    out = _out(args)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "horizons.md").write_text(text, encoding="utf8")
+    print(text)
+    if args.freeze:
+        horizons.freeze(result, periods.DEV_YEARS)
+        print(f"frozen in {horizons.HORIZONS_FILE}: horizons shown = "
+              + ", ".join(h for h, r in sorted(result.items(), key=lambda kv: int(kv[0])) if r["valid"]))
+
+
+def horizons_holdout(args) -> None:
+    from .evaluation import periods
+    from .forecasting import horizons, serving
+    record = horizons.load_record()
+    if record is None:
+        raise SystemExit("no frozen horizons: run evaluate-horizons --freeze first")
+    if record.get("holdout") and not args.force:
+        raise SystemExit("the horizons holdout has already been scored (--force re-runs it; the re-run is recorded)")
+    with psycopg2.connect(args.database_url) as conn:
+        data = serving.horizon_data(conn)
+    years = periods.holdout_years(pd_year(data.dates[-1]))
+    result = horizons.evaluate(horizons.walk_forward(data, years, log=print))
+    text = horizons.report(result, f"Expiry forecasts by horizon, holdout {years[0]}-{years[-1]} (scored once)")
+    _out(args).mkdir(parents=True, exist_ok=True)
+    (_out(args) / "horizons_holdout.md").write_text(text, encoding="utf8")
+    horizons.record_holdout(result, years, force=args.force)
+    print(text)
+
+
+def pd_year(day) -> int:
+    import pandas as pd
+    return pd.Timestamp(day).year
+
+
+def backfill_expiry_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.backfill_expiries(conn)
+    print(f"stored {n} backfilled expiry forecasts (2021 on, walk-forward with yearly refits)")
+
+
 def oi_levels(args) -> None:
     """Any day's levels, not just anchors: lets you look at the recorder before the first weekly anchor has OI."""
     from datetime import timedelta
@@ -313,6 +365,22 @@ def main(argv=None) -> None:
     p = sub.add_parser("refresh-forecasts", help="rebuild the dataset and forecast any new week (as the scheduler does)")
     p.add_argument("--database-url", **db)
     p.set_defaults(run=refresh_forecasts)
+
+    p = sub.add_parser("evaluate-horizons", help="expiry forecasts 1-10 sessions ahead on 2014-2020; --freeze records the gate")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--out", help="report folder (default: data/ml/reports at the repo root)")
+    p.add_argument("--freeze", action="store_true", help="write services/ml/horizons.json")
+    p.set_defaults(run=evaluate_horizons)
+
+    p = sub.add_parser("horizons-holdout", help="score the frozen horizons on 2021 on, once")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--out", help="report folder")
+    p.add_argument("--force", action="store_true", help="run again although it has run (the re-run is recorded)")
+    p.set_defaults(run=horizons_holdout)
+
+    p = sub.add_parser("backfill-expiry-forecasts", help="store 2021+ expiry forecasts as monitoring history")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=backfill_expiry_forecasts)
 
     p = sub.add_parser("explain-backfill", help="add explanations to live forecasts stored before ML-6")
     p.add_argument("--database-url", **db)

@@ -1,7 +1,7 @@
 'use client';
 
 import { Activity, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import type { ForecastBlock, Monitoring, WeeklyForecast } from '@/data/forecast';
+import type { ExpiryForecasts, ForecastBlock, Monitoring, WeeklyForecast } from '@/data/forecast';
 import { expiryLabel } from '@/data/live';
 import { num } from '@/data/format';
 
@@ -27,10 +27,11 @@ interface Props {
   forecast: WeeklyForecast | null;
   monitoring: Monitoring | null;
   status: 'loading' | 'ready' | 'unavailable';
+  expiries?: ExpiryForecasts | null;
 }
 
 /** Next week's closing range from the ml service, with its track record. */
-export function ForecastPanel({ forecast, monitoring, status }: Props) {
+export function ForecastPanel({ forecast, monitoring, status, expiries }: Props) {
   if (status !== 'ready' || !forecast) {
     return (
       <section className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 p-6">
@@ -99,6 +100,32 @@ export function ForecastPanel({ forecast, monitoring, status }: Props) {
         <Alternative title="VIX as published (usually too wide)" block={forecast.reference} />
         <p className="pt-1 text-xs text-slate-400 dark:text-slate-500">Why GARCH: {served.details}.</p>
       </div>
+
+      {expiries && expiries.expiries.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 dark:border-slate-800 pt-3">
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Every expiry, from the {expiryLabel(expiries.origin_date)} close (80% range)
+          </p>
+          <table className="mt-1 w-full text-sm">
+            <tbody>
+              {expiries.expiries.map((e) => (
+                <tr key={e.expiry_date} title={e.validation.reason}>
+                  <td className="py-0.5 text-slate-500 dark:text-slate-400">
+                    {expiryLabel(e.expiry_date)} <span className="text-xs">({e.sessions}d)</span>
+                  </td>
+                  <td className="py-0.5 text-right tabular-nums">{range(e.range_80)}</td>
+                  <td className="py-0.5 pl-2 text-right text-xs">
+                    {e.validation.valid ? <span className="text-emerald-600 dark:text-emerald-400">validated</span> : <span className="text-amber-600">not shown</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="pt-1 text-xs text-slate-400 dark:text-slate-500">
+            GARCH for each horizon; checked 2014-2020 (80% ranges held 80-83% of the time) and once on 2021 on (77-78%).
+          </p>
+        </div>
+      )}
     </section>
   );
 }

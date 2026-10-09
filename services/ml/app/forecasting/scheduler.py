@@ -1,4 +1,5 @@
-"""The weekly refresh, on its own: a background thread that forecasts each new week after its close.
+"""The forecast refreshes, on their own: a background thread that forecasts each new week after its close, and
+every listed expiry after each session's close (expiry forecasts, horizons.py).
 
 Every CHECK_SECONDS it asks: is the newest SPX daily row the last session of its week, has GRACE passed since
 that session's close, and is there no forecast for it yet? Only then does it run serving.refresh(). The daily
@@ -29,25 +30,38 @@ def due(latest_session, have_forecast: bool, now: datetime) -> bool:
     return now >= market_spec.session_close(latest_session) + GRACE
 
 
+def due_daily(latest_session, have_forecast: bool, now: datetime) -> bool:
+    """A session that closed GRACE ago with no expiry forecasts from it yet."""
+    if latest_session is None or have_forecast:
+        return False
+    return now >= market_spec.session_close(latest_session) + GRACE
+
+
 class ForecastScheduler:
     def __init__(self, connection):
         self.connection = connection          # context manager yielding a DB connection
         self.last_run: Optional[dict] = None
         self.last_error: Optional[str] = None
+        self.last_daily: Optional[dict] = None
 
     def check(self, now: Optional[datetime] = None) -> bool:
         from ..dataset import store
         from . import serving
         now = now or datetime.now(timezone.utc)
+        ran = False
         with self.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT max(date) FROM underlying_daily WHERE symbol = 'SPX'")
                 latest = cur.fetchone()[0]
-            if not due(latest, latest in store.forecast_anchors(conn), now):
-                return False
-            self.last_run = {"at": now.isoformat(timespec="seconds"), **serving.refresh(conn)}
-        log.info("weekly forecast refresh: %s", self.last_run)
-        return True
+            if due(latest, latest in store.forecast_anchors(conn), now):
+                self.last_run = {"at": now.isoformat(timespec="seconds"), **serving.refresh(conn)}
+                log.info("weekly forecast refresh: %s", self.last_run)
+                ran = True
+            if due_daily(latest, latest in store.expiry_origins(conn), now):
+                self.last_daily = {"at": now.isoformat(timespec="seconds"), **serving.refresh_expiries(conn)}
+                log.info("expiry forecast refresh: %s", self.last_daily)
+                ran = True
+        return ran
 
     def run_forever(self, stop: threading.Event) -> None:
         log.info("forecast scheduler started (checks every %ss)", CHECK_SECONDS)

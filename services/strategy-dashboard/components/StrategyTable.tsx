@@ -4,7 +4,6 @@ import type { StrategyRecommendation } from '@/data/types';
 import { ArrowUpRight } from 'lucide-react';
 import classNames from 'classnames';
 import { optionCode, usd } from '@/data/format';
-import { expiryLabel } from '@/data/live';
 
 interface StrategyTableProps {
   /** Already ranked (data/recommend.ts). */
@@ -12,12 +11,13 @@ interface StrategyTableProps {
   pickName?: string;
   selectedStrategy?: string;
   onSelect?: (strategy: StrategyRecommendation) => void;
-  forecastExpiry?: string | null;
+  /** Why nothing is scored on this expiry, if so. */
+  reason?: string | null;
 }
 
 const money = (value: number | null) => (value === null ? 'Unlimited' : usd(value));
 
-export function StrategyTable({ strategies, pickName, selectedStrategy, onSelect, forecastExpiry }: StrategyTableProps) {
+export function StrategyTable({ strategies, pickName, selectedStrategy, onSelect, reason }: StrategyTableProps) {
   const scored = strategies.some((s) => s.forecast);
   return (
     <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
@@ -29,9 +29,7 @@ export function StrategyTable({ strategies, pickName, selectedStrategy, onSelect
         <span className="text-sm text-slate-500 dark:text-slate-400 sm:max-w-sm sm:text-right">
           {scored
             ? 'Defined risk by return on risk after spread costs, then undefined risk by expected P&L. 1 lot. Click a row to inspect it.'
-            : forecastExpiry
-              ? `The forecast covers the ${expiryLabel(forecastExpiry)} expiry; choose it to rank these.`
-              : 'Ranking appears when the weekly forecast is available.'}
+            : reason ?? 'Ranking appears when the forecast is available.'}
         </span>
       </div>
       <div className="overflow-x-auto">

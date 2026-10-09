@@ -49,6 +49,22 @@ def window_stats(g: pd.DataFrame) -> Dict:
     }
 
 
+HORIZON_WINDOWS = (60, 250)
+
+
+def monitor_horizons(forecasts: pd.DataFrame) -> Dict:
+    """expiry_forecasts with outcomes: the same checks per horizon (sessions to expiry), over the last 60 and
+    250 forecasts. Consecutive daily forecasts overlap (the same days' moves), so a drift flag here is a prompt
+    to look, more than a test result."""
+    scored = (forecasts.dropna(subset=["close_ret"])
+              .rename(columns={"origin_date": "anchor_date"}).sort_values("anchor_date"))
+    out = {}
+    for h, g in scored.groupby("sessions"):
+        if len(g) >= 20:
+            out[str(int(h))] = {f"last_{w}": window_stats(g.tail(w)) for w in HORIZON_WINDOWS}
+    return out
+
+
 def monitor(forecasts: pd.DataFrame) -> Dict:
     """forecasts: store.read_forecasts output. One entry per method, per window."""
     scored = forecasts.dropna(subset=["close_ret"]).sort_values("anchor_date")
