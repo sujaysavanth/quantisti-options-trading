@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { usd } from '@/data/format';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuote } from '@/components/LiveQuoteProvider';
 import { defaultExpiry, expiryLabel, legMid, quoteExpiries } from '@/data/live';
+import { PaperBook } from '@/components/PaperBook';
+import { errorText } from '@/data/paper';
 
 type QuoteMessage = {
   type: string;
@@ -25,27 +26,6 @@ interface PaperLegForm {
   side: 'BUY' | 'SELL';
 }
 
-interface PaperTrade {
-  id: string;
-  symbol: string;
-  nickname?: string;
-  created_at: string;
-  entry_notional: number;
-  current_notional: number;
-  pnl: number;
-  legs: Array<{
-    identifier?: string;
-    strike: number;
-    option_type: string;
-    expiry: string;
-    quantity: number;
-    side: string;
-    entry_price?: number;
-    current_price?: number;
-    pnl: number;
-  }>;
-}
-
 // Blank strike/expiry are filled from the live quote (ATM strike, default expiry) once it arrives.
 const defaultLeg = (strike = '', expiry = ''): PaperLegForm => ({
   strike,
@@ -61,7 +41,7 @@ export default function PaperTradingPage() {
   const atmStrike = quote ? String(Math.round(quote.last_price / 5) * 5) : '';
   const liveExpiry = defaultExpiry(quote) ?? '';
   const [spot, setSpot] = useState<number | null>(null);
-  const [orders, setOrders] = useState<PaperTrade[]>([]);
+  const [paperRefresh, setPaperRefresh] = useState(0);
   const [symbol, setSymbol] = useState('SPX');
   const [nickname, setNickname] = useState('Weekly strategy');
   const [legs, setLegs] = useState<PaperLegForm[]>([defaultLeg()]);
@@ -85,26 +65,6 @@ export default function PaperTradingPage() {
     };
     return () => ws.close();
   }, [symbol]);
-
-  const fetchOrders = useCallback(async () => {
-    try {
-      const response = await fetch(`${SIM_API}/v1/paper/orders`, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch orders: ${response.status}`);
-      }
-      const data = (await response.json()) as PaperTrade[];
-      setOrders(data);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to load paper trades');
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchOrders();
-    const id = setInterval(fetchOrders, 15000);
-    return () => clearInterval(id);
-  }, [fetchOrders]);
 
   const handleLegChange = (index: number, key: keyof PaperLegForm, value: string) => {
     setLegs((prev) => prev.map((leg, idx) => (idx === index ? { ...leg, [key]: value } : leg)));
@@ -151,12 +111,11 @@ export default function PaperTradingPage() {
         }),
       });
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed with status ${response.status}`);
+        throw new Error(await errorText(response));
       }
       setNickname('Weekly strategy');
       setLegs([defaultLeg(atmStrike, liveExpiry)]);
-      fetchOrders();
+      setPaperRefresh((n) => n + 1);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Failed to create trade');
@@ -318,69 +277,8 @@ export default function PaperTradingPage() {
         </section>
 
         <section className="rounded-3xl border border-slate-800 bg-slate-900/60 p-6 shadow-lg shadow-black/30">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-semibold">Open Paper Trades</h2>
-            <button
-              type="button"
-              onClick={fetchOrders}
-              className="rounded-full border border-slate-700 px-4 py-1 text-sm text-slate-300 hover:bg-slate-800"
-            >
-              Refresh
-            </button>
-          </div>
-          {orders.length === 0 ? (
-            <p className="text-slate-400">No trades yet. Submit one above.</p>
-          ) : (
-            <div className="space-y-4">
-              {orders.map((order) => (
-                <div key={order.id} className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-lg font-semibold">{order.nickname || order.symbol}</p>
-                      <p className="text-xs uppercase text-slate-500">
-                        Created {new Date(order.created_at).toLocaleString()}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-slate-400">PnL</p>
-                      <p className={order.pnl >= 0 ? 'text-emerald-400 text-xl font-semibold' : 'text-rose-400 text-xl font-semibold'}>
-                        {usd(order.pnl)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="text-xs uppercase text-slate-500">
-                        <tr>
-                          <th className="py-2 pr-3">Leg</th>
-                          <th className="py-2 pr-3">Entry</th>
-                          <th className="py-2 pr-3">Current</th>
-                          <th className="py-2 pr-3">PnL</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {order.legs.map((leg, idx) => (
-                          <tr key={`${order.id}-leg-${idx}`}>
-                            <td className="py-2 pr-3">
-                              <div className="font-semibold">
-                                {leg.side} {leg.quantity} × {leg.strike} {leg.option_type}
-                              </div>
-                              <div className="text-xs text-slate-500">{leg.identifier || leg.expiry}</div>
-                            </td>
-                            <td className="py-2 pr-3">{leg.entry_price != null ? usd(leg.entry_price, 2) : '--'}</td>
-                            <td className="py-2 pr-3">{leg.current_price != null ? usd(leg.current_price, 2) : '--'}</td>
-                            <td className={`py-2 pr-3 ${leg.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {usd(leg.pnl)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <h2 className="mb-4 text-2xl font-semibold">Paper Account</h2>
+          <PaperBook refreshKey={paperRefresh} />
         </section>
       </div>
     </main>

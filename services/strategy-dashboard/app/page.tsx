@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuote } from '@/components/LiveQuoteProvider';
 import { defaultExpiry, expiryLabel, pct, quoteExpiries, type LiveLeg } from '@/data/live';
 import { ForecastPanel } from '@/components/ForecastPanel';
 import { MarketContext } from '@/components/MarketContext';
 import { WhyThisRange } from '@/components/WhyThisRange';
+import { PaperBook } from '@/components/PaperBook';
+import { errorText } from '@/data/paper';
 import { RecommendationCard } from '@/components/RecommendationCard';
 import { fitStrategy, rankStrategies, stickyPick } from '@/data/recommend';
 import { PayoffChart } from '@/components/PayoffChart';
@@ -14,7 +16,7 @@ import { RiskPanel } from '@/components/RiskPanel';
 import { StrategyTable } from '@/components/StrategyTable';
 import { OptionBreakdown } from '@/components/OptionBreakdown';
 import type { OptionLeg, StrategyRecommendation } from '@/data/types';
-import { optionCode, usd } from '@/data/format';
+import { optionCode } from '@/data/format';
 import { legPl, payoffCurve, payoffStats } from '@/data/payoff';
 import { priceAt, rescale, type QuantileForecast } from '@/data/distribution';
 import { positionGreeks } from '@/data/greeks';
@@ -36,26 +38,6 @@ const writeExpiryParam = (expiry: string | null) => {
   window.history.replaceState(null, '', url);
 };
 
-interface PaperTrade {
-  id: string;
-  symbol: string;
-  nickname?: string;
-  created_at: string;
-  entry_notional: number;
-  current_notional: number;
-  pnl: number;
-  legs: Array<{
-    identifier?: string;
-    strike: number;
-    option_type: string;
-    expiry: string;
-    quantity: number;
-    side: string;
-    entry_price?: number;
-    current_price?: number;
-    pnl: number;
-  }>;
-}
 
 /** The live quote's leg for a strategy leg: same OCC id, else same strike/type/expiry. */
 const quoteLeg = (legs: LiveLeg[], leg: { identifier?: string; strike: number; option_type: string; expiry: string }) =>
@@ -91,7 +73,7 @@ export default function Page() {
   const [strategies, setStrategies] = useState<StrategyRecommendation[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedLeg, setSelectedLeg] = useState<OptionLeg | null>(null);
-  const [orders, setOrders] = useState<PaperTrade[]>([]);
+  const [paperRefresh, setPaperRefresh] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -171,16 +153,6 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiry, quote?.default_expiry, features?.anchor_date]);
 
-  const fetchOrders = useCallback(async () => {
-    try {
-      const response = await fetch(`${SIM_API}/v1/paper/orders`, { cache: 'no-store' });
-      if (!response.ok) throw new Error(`Failed to fetch orders: ${response.status}`);
-      setOrders((await response.json()) as PaperTrade[]);
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
-
   // Live strategies from the simulator for the selected expiry.
   useEffect(() => {
     if (!expiryReady) return;
@@ -215,12 +187,6 @@ export default function Page() {
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiry, expiryReady, quote?.quoted_at]);
-
-  useEffect(() => {
-    fetchOrders();
-    const id = setInterval(fetchOrders, 15000);
-    return () => clearInterval(id);
-  }, [fetchOrders]);
 
   // Probability of profit and expected P&L for the shown expiry, from its own forecast (GARCH from the latest
   // close, ml /v1/predict/expiries; the weekly forecast is the fallback for its own expiry). Everything is taken
@@ -299,25 +265,14 @@ export default function Page() {
       const response = await fetch(`${SIM_API}/v1/paper/orders`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      if (!response.ok) throw new Error((await response.text()) || `Simulator responded ${response.status}`);
-      setSendMessage('Strategy sent to simulator. View live P&L below or on the Paper console.');
-      fetchOrders();
+      if (!response.ok) throw new Error(await errorText(response));
+      setSendMessage('Strategy sent to the paper account. Its P&L, expiry and settle time are below.');
+      setPaperRefresh((n) => n + 1);
     } catch (err: unknown) {
       console.error(err);
       setSendError(err instanceof Error ? err.message : 'Failed to send strategy to simulator');
     } finally {
       setIsSending(false);
-    }
-  };
-
-  const handleDeleteOrder = async (id: string) => {
-    try {
-      const response = await fetch(`${SIM_API}/v1/paper/orders/${id}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error(`Failed to delete trade (${response.status})`);
-      fetchOrders();
-    } catch (err) {
-      console.error(err);
-      setSendError('Failed to delete trade');
     }
   };
 
@@ -402,7 +357,7 @@ export default function Page() {
               <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Simulator Bridge</p>
               <h3 className="text-2xl font-semibold">Place Dummy Trade</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Sends the selected strategy to the simulator&apos;s paper-trading endpoint.
+                Sends the selected strategy (1 lot, at the mids) to the $30,000 paper account.
               </p>
             </div>
             <button
@@ -417,37 +372,7 @@ export default function Page() {
           {sendMessage && <p className="mt-3 text-sm text-emerald-500">{sendMessage}</p>}
           {sendError && <p className="mt-3 text-sm text-rose-500">{sendError}</p>}
           <div className="mt-6">
-            <h4 className="text-lg font-semibold mb-3">Live Paper Trades</h4>
-            {orders.length === 0 ? (
-              <p className="text-sm text-slate-500">No trades yet. Submit the strategy to create one.</p>
-            ) : (
-              <div className="space-y-3">
-                {orders.map((order) => (
-                  <div key={order.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4 bg-slate-50 dark:bg-slate-800/30">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold">{order.nickname || order.symbol}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">Created {new Date(order.created_at).toLocaleString()}</p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <p className={order.pnl >= 0 ? 'text-emerald-500 font-semibold' : 'text-rose-400 font-semibold'}>{usd(order.pnl)}</p>
-                        <button type="button" onClick={() => handleDeleteOrder(order.id)} className="text-xs text-slate-500 hover:text-rose-400">
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      {order.legs.map((leg, idx) => (
-                        <div key={`${order.id}-leg-${idx}`} className="flex justify-between">
-                          <span>{leg.side} {leg.quantity} × {leg.strike} {leg.option_type}</span>
-                          <span className={leg.pnl >= 0 ? 'text-emerald-500' : 'text-rose-400'}>{usd(leg.pnl)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <PaperBook refreshKey={paperRefresh} />
           </div>
         </section>
 
