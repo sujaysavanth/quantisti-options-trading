@@ -7,7 +7,9 @@ import { optionCode, usd } from '@/data/format';
 import { expiryLabel } from '@/data/live';
 
 interface StrategyTableProps {
+  /** Already ranked (data/recommend.ts). */
   strategies: StrategyRecommendation[];
+  pickName?: string;
   selectedStrategy?: string;
   onSelect?: (strategy: StrategyRecommendation) => void;
   forecastExpiry?: string | null;
@@ -15,21 +17,21 @@ interface StrategyTableProps {
 
 const money = (value: number | null) => (value === null ? 'Unlimited' : usd(value));
 
-export function StrategyTable({ strategies, selectedStrategy, onSelect, forecastExpiry }: StrategyTableProps) {
+export function StrategyTable({ strategies, pickName, selectedStrategy, onSelect, forecastExpiry }: StrategyTableProps) {
   const scored = strategies.some((s) => s.forecast);
   return (
     <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between mb-6">
         <div>
           <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Live strategies</p>
-          <h3 className="text-2xl font-semibold">How each fares under the forecast</h3>
+          <h3 className="text-2xl font-semibold">{scored ? 'Ranked under the forecast' : 'Strategies'}</h3>
         </div>
         <span className="text-sm text-slate-500 dark:text-slate-400 sm:max-w-sm sm:text-right">
           {scored
-            ? 'Probability of profit and expected P&L at expiry under the weekly range forecast (1 lot).'
+            ? 'Defined risk by return on risk after spread costs, then undefined risk by expected P&L. 1 lot. Click a row to inspect it.'
             : forecastExpiry
-              ? `The forecast covers the ${expiryLabel(forecastExpiry)} expiry; choose it to see probabilities.`
-              : 'Probabilities appear when the weekly forecast is available.'}
+              ? `The forecast covers the ${expiryLabel(forecastExpiry)} expiry; choose it to rank these.`
+              : 'Ranking appears when the weekly forecast is available.'}
         </span>
       </div>
       <div className="overflow-x-auto">
@@ -39,10 +41,10 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect, forecast
               <th className="py-3 pr-4 font-semibold">Strategy</th>
               <th className="py-3 pr-4 font-semibold">Structure</th>
               <th className="py-3 pr-4 font-semibold">Chance of profit</th>
-              <th className="py-3 pr-4 font-semibold">Expected P&L</th>
+              <th className="py-3 pr-4 font-semibold">Expected P&L after costs</th>
+              <th className="py-3 pr-4 font-semibold">Return on risk</th>
               <th className="py-3 pr-4 font-semibold">Max profit</th>
               <th className="py-3 pr-4 font-semibold">Max loss</th>
-              <th className="py-3 pr-4 font-semibold">Reward / risk</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -59,7 +61,11 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect, forecast
                   <td className="py-4 pr-4">
                     <div className="font-semibold flex items-center gap-2">
                       {strategy.name}
-                      <ArrowUpRight className="h-4 w-4 text-primary-500" />
+                      {strategy.name === pickName ? (
+                        <span className="rounded-full bg-primary-500 px-2 py-0.5 text-[10px] font-semibold uppercase text-white">Pick</span>
+                      ) : (
+                        <ArrowUpRight className="h-4 w-4 text-primary-500" />
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">{strategy.type}</p>
                   </td>
@@ -68,12 +74,14 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect, forecast
                   </td>
                   <td className="py-4 pr-4 font-semibold tabular-nums">{f ? `${Math.round(f.probabilityOfProfit * 100)}%` : '–'}</td>
                   <td className={classNames('py-4 pr-4 font-semibold tabular-nums',
-                    f ? (f.expectedPl >= 0 ? 'text-emerald-500' : 'text-rose-500') : '')}>
-                    {f ? usd(f.expectedPl) : '–'}
+                    f ? (f.netExpectedPl >= 0 ? 'text-emerald-500' : 'text-rose-500') : '')}>
+                    {f ? usd(f.netExpectedPl) : '–'}
+                  </td>
+                  <td className="py-4 pr-4 tabular-nums">
+                    {f ? (f.returnOnRisk === null ? 'undefined risk' : `${(f.returnOnRisk * 100).toFixed(1)}%`) : '–'}
                   </td>
                   <td className="py-4 pr-4 tabular-nums">{money(strategy.maxProfit)}</td>
                   <td className="py-4 pr-4 tabular-nums">{money(strategy.maxLoss)}</td>
-                  <td className="py-4 pr-4 tabular-nums">{strategy.riskReward === null ? '–' : `${strategy.riskReward.toFixed(2)}x`}</td>
                 </tr>
               );
             })}
@@ -87,8 +95,8 @@ export function StrategyTable({ strategies, selectedStrategy, onSelect, forecast
       </div>
       {scored && (
         <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-          Expected P&L averages the payoff over the forecast&apos;s distribution of the close, priced at today&apos;s mids. It is an
-          estimate, as good as the forecast&apos;s calibration (see its track record above).
+          Expected P&L averages the payoff over the forecast&apos;s distribution of the close at today&apos;s mids, minus half the
+          bid/ask on every leg. It is only as good as the forecast&apos;s calibration (track record above).
         </p>
       )}
     </section>

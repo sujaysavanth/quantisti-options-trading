@@ -1,11 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuote } from '@/components/LiveQuoteProvider';
 import { defaultExpiry, expiryLabel, pct, quoteExpiries, type LiveLeg } from '@/data/live';
 import { ForecastPanel } from '@/components/ForecastPanel';
 import { MarketContext } from '@/components/MarketContext';
 import { WhyThisRange } from '@/components/WhyThisRange';
+import { RecommendationCard } from '@/components/RecommendationCard';
+import { fitStrategy, rankStrategies, stickyPick } from '@/data/recommend';
 import { PayoffChart } from '@/components/PayoffChart';
 import { GreekStats } from '@/components/GreekStats';
 import { RiskPanel } from '@/components/RiskPanel';
@@ -13,8 +15,8 @@ import { StrategyTable } from '@/components/StrategyTable';
 import { OptionBreakdown } from '@/components/OptionBreakdown';
 import type { OptionLeg, StrategyRecommendation } from '@/data/types';
 import { optionCode, usd } from '@/data/format';
-import { legPl, payoffCurve, payoffStats, strategyPl } from '@/data/payoff';
-import { priceAt, rescale, scorePayoff, type QuantileForecast } from '@/data/distribution';
+import { legPl, payoffCurve, payoffStats } from '@/data/payoff';
+import { priceAt, rescale, type QuantileForecast } from '@/data/distribution';
 import { positionGreeks } from '@/data/greeks';
 import {
   fetchChainSentiment, fetchLatestFeatures, fetchMonitoring, fetchVix, fetchWeekly, fractionLeft,
@@ -71,6 +73,7 @@ function toStrategy(s: any, quoteLegs: LiveLeg[]): StrategyRecommendation {
       identifier: leg.identifier, action: leg.side, optionType: leg.option_type, strike: leg.strike,
       expiry: leg.expiry, quantity: leg.quantity ?? 1, premium: leg.price ?? 0,
       iv: q?.iv ?? null, delta: q?.delta ?? null, projectedPl: 0, payoffPoints: [],
+      halfSpread: q?.bid != null && q?.ask != null && q.ask >= q.bid ? (q.ask - q.bid) / 2 : null,
     };
     optionLeg.projectedPl = Math.round(legPl(optionLeg, spot));
     optionLeg.payoffPoints = payoffCurve([optionLeg], spot);
@@ -213,24 +216,36 @@ export default function Page() {
   }, [fetchOrders]);
 
   // Probability of profit and expected P&L under the forecast, for strategies on the forecast's expiry.
-  // The forecast is made at the anchor's close for the whole week; mid-week it is re-centred on the live
-  // price and narrowed to the time left (see rescale), so strategies are scored on what can still happen.
+  // The forecast is made at the anchor's close for the whole week; mid-week it is re-centred and narrowed to
+  // the time left (see rescale). Both are taken at the moment of the option quotes, not now: the chain is
+  // ~15 minutes delayed while the index updates every minute, and mixing the two moments makes options look
+  // mispriced by however far SPX moved in between. The centre is that expiry's put-call-parity forward.
   const spot = quote?.last_price ?? null;
+  const chainSummary = quote?.expiries?.find((e) => e.expiry === forecast?.expiry_date);
+  const chainCentre = chainSummary?.forward ?? null;
+  const chainTime = chainSummary?.quoted_at ?? quote?.quoted_at ?? null;
   const dist = useMemo<QuantileForecast | null>(() => {
     if (!forecast) return null;
     const base = { spot: forecast.spot, quantiles: forecast.served.quantiles };
-    return rescale(base, spot ?? forecast.spot, fractionLeft(forecast.anchor_date, forecast.expiry_date));
-  }, [forecast, spot]);
+    const at = chainTime ? new Date(chainTime) : new Date();
+    return rescale(base, chainCentre ?? spot ?? forecast.spot, fractionLeft(forecast.anchor_date, forecast.expiry_date, at));
+  }, [forecast, chainCentre, chainTime, spot]);
 
-  const scored = useMemo(() => {
-    if (!forecast || !dist) return strategies;
-    return strategies.map((s) =>
-      s.expiry === forecast.expiry_date
-        ? { ...s, forecast: { ...scorePayoff(dist, (p) => strategyPl(s.legs, p)), method: forecast.served.method } }
-        : s);
+  const ranking = useMemo(() => {
+    if (!forecast || !dist) return rankStrategies(strategies);
+    return rankStrategies(strategies.map((s) =>
+      s.expiry === forecast.expiry_date ? { ...s, forecast: fitStrategy(s, dist, forecast.served.method) } : s));
   }, [strategies, forecast, dist]);
+  const { ranked } = ranking;
+  // Sticky: a new leader must beat the current pick clearly (stickyPick) before the recommendation changes.
+  const lastPick = useRef<string | null>(null);
+  const pick = useMemo(() => stickyPick(ranking, lastPick.current), [ranking]);
+  useEffect(() => {
+    lastPick.current = pick?.name ?? null;
+  }, [pick]);
 
-  const selected = scored.find((s) => s.name === selectedName) ?? scored[0] ?? null;
+  // The pick is selected until the user chooses another strategy.
+  const selected = ranked.find((s) => s.name === selectedName) ?? pick ?? ranked[0] ?? null;
   const greeks = useMemo(() => (selected && spot ? positionGreeks(selected.legs, spot) : null), [selected, spot]);
   const range = (lo: number, hi: number): [number, number] => [priceAt(dist!, lo), priceAt(dist!, hi)];
   const bands = forecast && dist
@@ -321,6 +336,26 @@ export default function Page() {
 
         <WhyThisRange forecast={forecast} />
 
+        {feedStatus !== 'waiting' && (
+          <>
+            <RecommendationCard
+              pick={pick}
+              asOf={chainTime}
+              scoredCount={ranked.filter((s) => s.forecast).length}
+              forecastExpiry={forecast?.expiry_date ?? null}
+              onSelect={handleSelect}
+              selectedName={selected?.name}
+            />
+            <StrategyTable
+              strategies={ranked}
+              pickName={pick?.name}
+              selectedStrategy={selected?.name}
+              onSelect={handleSelect}
+              forecastExpiry={forecast?.expiry_date}
+            />
+          </>
+        )}
+
         {feedStatus === 'waiting' ? (
           <section className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 p-10 text-center">
             <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Live strategies</p>
@@ -338,13 +373,6 @@ export default function Page() {
             <GreekStats greeks={greeks} name={selected?.name} legs={selected?.legs.length ?? 0} />
           </>
         )}
-
-        <StrategyTable
-          strategies={scored}
-          selectedStrategy={selected?.name}
-          onSelect={handleSelect}
-          forecastExpiry={forecast?.expiry_date}
-        />
 
         <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

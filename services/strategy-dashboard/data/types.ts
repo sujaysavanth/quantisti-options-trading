@@ -17,6 +17,8 @@ export interface OptionLeg {
   /** From the live quote, when the chain has them. */
   iv?: number | null;
   delta?: number | null;
+  /** Half the bid/ask spread in points: the cost of crossing it to open. */
+  halfSpread?: number | null;
   /** P&L at expiry if SPX settles at today's spot, in dollars. */
   projectedPl: number;
   payoffPoints: PayoffPoint[];
@@ -25,8 +27,16 @@ export interface OptionLeg {
 /** Probability of profit and expected P&L under the weekly range forecast (only for its own expiry). */
 export interface ForecastFit {
   probabilityOfProfit: number;
+  /** At mid prices. */
   expectedPl: number;
   method: string;
+  /** Dollars to cross half the bid/ask on every leg; legs without a two-sided quote are counted in spreadUnknown. */
+  spreadCost: number;
+  spreadUnknown: number;
+  /** Expected P&L after the spread cost. */
+  netExpectedPl: number;
+  /** netExpectedPl / max loss; null for undefined risk. */
+  returnOnRisk: number | null;
 }
 
 export interface StrategyRecommendation {
