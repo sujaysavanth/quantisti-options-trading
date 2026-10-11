@@ -80,9 +80,16 @@ services:
     build: ./services/stats
     environment:
       - PORT=8084
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
+      - PORTFOLIO_URL=http://portfolio:8083
+      - MARKET_STREAM_URL=http://market_stream:8090
     ports:
       - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      portfolio:
+        condition: service_started
 
   ml:
     build: ./services/ml

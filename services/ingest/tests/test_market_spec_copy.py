@@ -1,11 +1,11 @@
-"""market_spec.py is copied into market, simulator, ingest, ml, portfolio and stream-processing. Fail if the copies drift."""
+"""market_spec.py is copied into market, simulator, ingest, ml, portfolio, stats and stream-processing. Fail if the copies drift."""
 
 from pathlib import Path
 
 import pytest
 
 SERVICES = Path(__file__).resolve().parents[2]
-COPIES = [SERVICES / name / "app" / "market_spec.py" for name in ("market", "simulator", "ingest", "ml", "portfolio")] + [
+COPIES = [SERVICES / name / "app" / "market_spec.py" for name in ("market", "simulator", "ingest", "ml", "portfolio", "stats")] + [
     SERVICES / "stream-processing" / "jobs" / "market_spec.py"]
 
 

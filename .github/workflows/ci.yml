@@ -23,8 +23,8 @@ jobs:
     strategy:
       fail-fast: false            # show every failing service, not just the first
       matrix:
-        # Services with tests. gateway, stats and explain are health-only stubs (built below).
-        service: [market, simulator, ml, ingest, portfolio]
+        # Services with tests. gateway and explain are health-only stubs (built below).
+        service: [market, simulator, ml, ingest, portfolio, stats]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
