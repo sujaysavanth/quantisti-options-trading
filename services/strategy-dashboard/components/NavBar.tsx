@@ -10,7 +10,8 @@ import { feedLabel } from '@/data/live';
 const LINKS = [
   { href: '/', label: 'Strategies' },
   { href: '/chain', label: 'Option Chain' },
-  { href: '/paper', label: 'Paper' }
+  { href: '/paper', label: 'Paper' },
+  { href: '/portfolio', label: 'Portfolio' }
 ];
 
 export function NavBar() {
