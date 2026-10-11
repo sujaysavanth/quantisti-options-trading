@@ -5,7 +5,7 @@ from enum import Enum
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class BacktestStatus(str, Enum):
@@ -25,7 +25,9 @@ class EntryLogic(str, Enum):
 
 
 class ExitLogic(str, Enum):
-    """Exit logic for backtests."""
+    """Exit logic for backtests. The engine applies every exit setting that has a value (stop_loss_pct,
+    target_pct, max_holding_days) and otherwise holds to expiry; STOP_LOSS, TARGET and DAYS require their
+    setting so a backtest can't name a rule it doesn't apply."""
     ON_EXPIRY = "ON_EXPIRY"  # Hold till expiry
     STOP_LOSS = "STOP_LOSS"  # Exit on stop loss
     TARGET = "TARGET"  # Exit on target
@@ -44,7 +46,7 @@ class BacktestCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Backtest name")
     start_date: date = Field(..., description="Start date for backtest")
     end_date: date = Field(..., description="End date for backtest")
-    initial_capital: float = Field(default=100000.0, gt=0, description="Initial capital in INR")
+    initial_capital: float = Field(default=100000.0, gt=0, description="Initial capital in USD")
     entry_logic: EntryLogic = Field(default=EntryLogic.ON_DATE, description="When to enter trades")
     exit_logic: ExitLogic = Field(default=ExitLogic.ON_EXPIRY, description="When to exit trades")
     stop_loss_pct: Optional[float] = Field(None, gt=0, le=100, description="Stop loss percentage")
@@ -58,6 +60,14 @@ class BacktestCreate(BaseModel):
         if 'start_date' in info.data and v < info.data['start_date']:
             raise ValueError('end_date must be >= start_date')
         return v
+
+    @model_validator(mode='after')
+    def exit_logic_has_its_setting(self):
+        needs = {ExitLogic.STOP_LOSS: 'stop_loss_pct', ExitLogic.TARGET: 'target_pct', ExitLogic.DAYS: 'max_holding_days'}
+        field = needs.get(self.exit_logic)
+        if field and getattr(self, field) is None:
+            raise ValueError(f'exit_logic {self.exit_logic.value} needs {field}')
+        return self
 
     model_config = {
         "json_schema_extra": {

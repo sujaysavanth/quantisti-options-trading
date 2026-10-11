@@ -10,10 +10,41 @@ from psycopg2.extras import RealDictCursor
 from .. import market_spec
 from ..db.connection import get_db_connection, return_db_connection
 from ..services.market_client import MarketDataClient
-from ..models.backtest import EntryLogic, ExitLogic
+from ..models.backtest import EntryLogic
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def intrinsic(option_type: str, strike: float, spot: float) -> float:
+    return max(spot - strike, 0.0) if option_type == 'C' else max(strike - spot, 0.0)
+
+
+def exit_value(trade_legs: List[Dict[str, Any]], prices: List[float]) -> float:
+    """Cash from closing every leg at `prices`: selling back the longs, buying back the shorts (quantity is
+    already x100)."""
+    return sum((p if leg['action'] == 'BUY' else -p) * leg['quantity'] for leg, p in zip(trade_legs, prices))
+
+
+def exit_rule_hit(pnl: float, entry_premium: float, days_held: int, stop_loss_pct: Optional[float],
+                  target_pct: Optional[float], max_holding_days: Optional[int]) -> Optional[str]:
+    """Which exit rule fires, if any. Percentages are of the premium paid (debit) or received (credit), so a
+    credit trade with target_pct=50 closes once half the credit is earned and one with stop_loss_pct=100 once the
+    loss equals the credit. Every rule with a value is active; the stop is checked first (the conservative
+    reading when a single close crosses both), then the target, then the holding period (calendar days)."""
+    base = abs(entry_premium)
+    if base > 0 and stop_loss_pct is not None and pnl <= -base * stop_loss_pct / 100:
+        return "STOP_LOSS"
+    if base > 0 and target_pct is not None and pnl >= base * target_pct / 100:
+        return "TARGET"
+    if max_holding_days is not None and days_held >= max_holding_days:
+        return "MAX_DAYS"
+    return None
+
+
+def exit_check_days(entry_date: date, nearest_expiry: date) -> List[date]:
+    """Sessions whose close is checked for an early exit: after the entry, before the nearest expiry."""
+    return [d for d in market_spec.trading_days(entry_date, nearest_expiry) if entry_date < d < nearest_expiry]
 
 
 class BacktestEngine:
@@ -345,6 +376,22 @@ class BacktestEngine:
         finally:
             return_db_connection(conn)
 
+    async def _prices_on(self, trade_legs: List[Dict[str, Any]], day: date) -> Optional[List[float]]:
+        """Every leg's price at the close of `day` (one chain request per expiry), or None if any leg is missing."""
+        chains: Dict[date, Optional[Dict[str, Any]]] = {}
+        prices = []
+        for leg in trade_legs:
+            if leg['expiry_date'] not in chains:
+                chains[leg['expiry_date']] = await self.market_client.get_option_chain(
+                    target_date=day, expiry_date=leg['expiry_date'], strike_range=20)
+            chain = chains[leg['expiry_date']] or {}
+            match = next((o for o in chain.get('options', [])
+                          if float(o['strike']) == float(leg['strike']) and o['option_type'] == leg['option_type']), None)
+            if match is None or match.get('price') is None:
+                return None
+            prices.append(float(match['price']))
+        return prices
+
     async def _simulate_exit(
         self,
         trade_id: UUID,
@@ -357,57 +404,49 @@ class BacktestEngine:
         target_pct: Optional[float],
         max_holding_days: Optional[int]
     ) -> Dict[str, Any]:
-        """Simulate trade exit based on exit logic."""
-        exit_date = None
-        exit_reason = None
+        """Close the trade by its exit rules (see exit_rule_hit), else at the nearest expiry's close.
 
-        # Find the nearest expiry among all legs
-        # For Calendar spreads, we usually exit when the near leg expires
+        Rules are checked at each session close after entry and before the nearest expiry, at that close's prices
+        (no intraday fills). A day on which any leg can't be priced is skipped. At expiry, legs expiring that day
+        settle at intrinsic against the official close (SPX is cash-settled) and any later leg (the far leg of a
+        calendar) is closed at its market price.
+        """
         nearest_expiry = min(leg['expiry_date'] for leg in trade_legs)
+        exit_date, exit_reason, prices = nearest_expiry, "EXPIRY", None
 
-        # For simplicity, exit on nearest expiry
-        # TODO: Implement daily checks for stop loss, target, max days. Until then stop_loss_pct,
-        # target_pct and max_holding_days are stored with the backtest but have no effect.
-        if exit_logic == ExitLogic.ON_EXPIRY.value or True:  # Default to expiry for now
-            exit_date = nearest_expiry
-            exit_reason = "EXPIRY"
+        if any(v is not None for v in (stop_loss_pct, target_pct, max_holding_days)):
+            for day in exit_check_days(entry_date, nearest_expiry):
+                day_prices = await self._prices_on(trade_legs, day)
+                if day_prices is None:
+                    continue
+                pnl = entry_premium + exit_value(trade_legs, day_prices)
+                reason = exit_rule_hit(pnl, entry_premium, (day - entry_date).days,
+                                       stop_loss_pct, target_pct, max_holding_days)
+                if reason:
+                    exit_date, exit_reason, prices = day, reason, day_prices
+                    break
 
-        # SPX is cash-settled at the expiry close.
         exit_spot = await self.market_client.get_spot_price(exit_date)
         if not exit_spot:
-            raise ValueError(f"No close available for expiry {exit_date}")
+            raise ValueError(f"No close available for {exit_date}")
 
-        # Calculate exit premium
-        exit_premium = 0.0
-        for leg in trade_legs:
-            # If this leg is expiring today, use intrinsic value
-            if leg['expiry_date'] == exit_date:
-                if leg['option_type'] == 'C':
-                    exit_price = max(exit_spot - leg['strike'], 0)
-                else:
-                    exit_price = max(leg['strike'] - exit_spot, 0)
-            else:
-                # If leg is NOT expiring (e.g. far leg of calendar), get market price
+        if prices is None:
+            prices = []
+            for leg in trade_legs:
+                if leg['expiry_date'] == exit_date:
+                    prices.append(intrinsic(leg['option_type'], leg['strike'], exit_spot))
+                    continue
+                # A leg that doesn't expire today (e.g. the far leg of a calendar): its market price.
                 option_data = await self.market_client.get_option_price(
                     strike=leg['strike'],
                     option_type=leg['option_type'],
                     target_date=exit_date,
                     expiry_date=leg['expiry_date']
                 )
-                if option_data:
-                    exit_price = float(option_data['price'])
-                else:
-                    # Fall back to intrinsic value if the market service cannot price the leg
-                    if leg['option_type'] == 'C':
-                        exit_price = max(exit_spot - leg['strike'], 0)
-                    else:
-                        exit_price = max(leg['strike'] - exit_spot, 0)
-
-            # Calculate exit premium (opposite of entry)
-            if leg['action'] == 'BUY':
-                exit_premium += exit_price * leg['quantity']
-            else:  # SELL
-                exit_premium -= exit_price * leg['quantity']
+                # Fall back to intrinsic value if the market service cannot price the leg
+                prices.append(float(option_data['price']) if option_data
+                              else intrinsic(leg['option_type'], leg['strike'], exit_spot))
+        exit_premium = exit_value(trade_legs, prices)
 
         # Calculate P&L
         pnl = entry_premium + exit_premium
