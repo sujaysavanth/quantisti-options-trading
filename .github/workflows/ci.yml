@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false            # show every failing service, not just the first
       matrix:
-        # Services with tests. gateway and explain are health-only stubs (built below).
+        # Services with tests. gateway is a health-only stub (built below).
         service: [market, simulator, ml, ingest, portfolio, stats]
     steps:
       - uses: actions/checkout@v4
@@ -121,7 +121,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [gateway, market, simulator, portfolio, stats, ml, explain, market-stream, ingest, stream-processing]
+        service: [gateway, market, simulator, portfolio, stats, ml, market-stream, ingest, stream-processing]
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

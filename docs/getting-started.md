@@ -40,7 +40,7 @@ docker compose -f docker-compose.yml -f docker-compose.streaming.yml up -d --bui
 docker compose -f docker-compose.yml -f docker-compose.streaming.yml ps     # ingest and kafka "healthy"
 ```
 
-Leave out the service names to start everything, including the health-only stubs (gateway, portfolio, stats, ml, explain).
+Leave out the service names to start everything, including ml, portfolio, stats and the health-only gateway stub.
 
 From now on, during market hours the ingest service publishes SPX/VIX bars every 60 s and the option chain every 90 s
 (CBOE, ~15 min delayed). After each close it publishes the closing chain and the daily rows. Spark writes all of
@@ -105,7 +105,10 @@ cd services\strategy-dashboard; npm install; npm run dev     # http://localhost:
 | Kafka UI (topics, messages, DLQ) | http://localhost:8089 |
 | Spark UI (streaming queries) | http://localhost:4040 |
 | Dashboard | http://localhost:3000 |
-| Stubs: gateway, portfolio, stats, ml, explain | :8080, :8083 - :8086 |
+| Portfolio API (positions, snapshots, performance) | http://localhost:8083/docs |
+| Stats API (Greeks, stress, VaR, what-if) | http://localhost:8084/docs |
+| ML API (forecasts, explanations, monitoring) | http://localhost:8085/docs |
+| Stub: gateway | :8080 |
 
 Every API has `/health/healthz` and `/health/readyz`. Ingest uses host port 8088 (set `INGEST_HOST_PORT` to change it).
 
