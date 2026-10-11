@@ -49,10 +49,16 @@ async def account() -> Optional[dict]:
     return await _get(_simulator("/v1/paper/account"))
 
 
+async def capital_scenarios(body: dict) -> Optional[list]:
+    """The simulator's capital per scenario: {capital_held, by_trade: [{amount, basis}]}."""
+    out = await _post(_simulator("/v1/paper/capital-held"), body)
+    return None if out is None else out["scenarios"]
+
+
 async def capital_held(body: dict) -> Optional[list]:
     """Total capital held per scenario, from the simulator's rules."""
-    out = await _post(_simulator("/v1/paper/capital-held"), body)
-    return None if out is None else [s["capital_held"] for s in out["scenarios"]]
+    out = await capital_scenarios(body)
+    return None if out is None else [s["capital_held"] for s in out]
 
 
 async def positions() -> Optional[list]:

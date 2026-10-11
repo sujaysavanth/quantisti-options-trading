@@ -4,6 +4,7 @@ VaR with the realised next-session P&L from the portfolio's close snapshots."""
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
@@ -147,8 +148,20 @@ class VarStore:
         return [{k: (float(v) if k in num and v is not None else v) for k, v in dict(r).items()} for r in rows]
 
 
-async def current() -> Optional[Dict[str, Any]]:
-    """The open book's VaR now, from live inputs; None if the simulator or the quote is unavailable."""
+@dataclass
+class LiveInputs:
+    trades: List[dict]
+    account: dict
+    market: Market
+    rate: float
+    moves: List[var.Move]
+    sigma_now: Optional[float]
+    sigma_origin: Optional[str]
+
+
+async def gather() -> Optional[LiveInputs]:
+    """Open trades, account, quote, rate, SPX/VIX history and the GARCH sigma; None if the simulator or the quote
+    is unavailable."""
     from .. import clients        # here, not at import: keeps the pure functions above testable without httpx calls
     trades, account = await clients.open_trades(), await clients.account()
     quote = await clients.quote()
@@ -157,9 +170,17 @@ async def current() -> Optional[Dict[str, Any]]:
     rate = clients.latest_rate()
     rate = rate if rate is not None else market_spec.FALLBACK_RATE
     garch = await clients.garch_next_sigma()
-    result = compute(trades, Market(quote, rate), rate, clients.daily_moves() or [],
-                     garch[0] if garch else None, garch[1] if garch else None)
-    result["account_value"] = float(account["account_value"])
+    return LiveInputs(trades, account, Market(quote, rate), rate, clients.daily_moves() or [],
+                      garch[0] if garch else None, garch[1] if garch else None)
+
+
+async def current() -> Optional[Dict[str, Any]]:
+    """The open book's VaR now, from live inputs; None if the simulator or the quote is unavailable."""
+    x = await gather()
+    if x is None:
+        return None
+    result = compute(x.trades, x.market, x.rate, x.moves, x.sigma_now, x.sigma_origin)
+    result["account_value"] = float(x.account["account_value"])
     return result
 
 

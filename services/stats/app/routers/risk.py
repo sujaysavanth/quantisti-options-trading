@@ -5,17 +5,20 @@
     GET  /v1/risk/var           1-day VaR and expected shortfall now, 95% / 99%, three methods
     GET  /v1/risk/var/history   stored VaR per session with the realised next-day P&L, breaches, Kupiec, Christoffersen
     POST /v1/risk/var/run       store this session's VaR if it is due (the background task does this after each close)
+    POST /v1/risk/what-if       Greeks, VaR and stress of the book now and with a candidate trade added, and its capital
 """
 
 from datetime import date, datetime, timezone
-from typing import Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from .. import clients, market_spec
 from ..services import stress as st
 from ..services import var as var_maths
 from ..services import var_run
+from ..services import whatif
 from ..services.exposure import Market, portfolio_greeks
 
 router = APIRouter(prefix="/v1/risk", tags=["risk"])
@@ -97,3 +100,38 @@ async def risk_var_history(request: Request, start: Optional[date] = None, end: 
 async def risk_var_run(request: Request):
     return {"due": var_run.due_close(datetime.now(timezone.utc)),
             "rows_written": await var_run.store_due(request.app.state.var_store)}
+
+
+class CandidateLeg(BaseModel):
+    strike: float
+    option_type: Literal["CALL", "PUT"]
+    expiry: date
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(1, gt=0)
+
+
+class Candidate(BaseModel):
+    legs: List[CandidateLeg] = Field(min_length=1)
+
+
+@router.post("/what-if", summary="The book's risk with a candidate trade added")
+async def risk_what_if(candidate: Candidate):
+    x = await var_run.gather()
+    if x is None:
+        raise HTTPException(status_code=503, detail="Simulator or live SPX quote unavailable.")
+    trade = whatif.candidate_trade([leg.model_dump() for leg in candidate.legs], x.market)
+    if "errors" in trade:
+        raise HTTPException(status_code=422, detail="Can't price: " + "; ".join(trade["errors"]))
+    days = clients.extreme_days(10, 5) or []
+    before = whatif.measure(x.trades, x.market, x.rate, x.moves, x.sigma_now, days)
+    after = whatif.measure([*x.trades, trade], x.market, x.rate, x.moves, x.sigma_now, days)
+    cap = await clients.capital_scenarios(st.capital_request(
+        [trade], x.market.spot, [st.Scenario("now", 0.0, 0.0, 0)], [[[leg["entry_price"] for leg in trade["legs"]]]]))
+    held = cap[0]["by_trade"][0] if cap else {"amount": None, "basis": None}
+    return {
+        "spot": x.market.spot, "quoted_at": x.market.quoted_at, "open_trades": len(x.trades),
+        "candidate": trade["legs"],
+        "capital": whatif.capital_check(held["amount"], held["basis"], float(x.account["available"])),
+        "metrics": whatif.compare(before, after),
+        "var_method": "filtered_historical",
+    }

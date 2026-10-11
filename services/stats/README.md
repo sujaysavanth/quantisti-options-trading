@@ -9,6 +9,7 @@ contract), prices from market-stream (`MARKET_STREAM_URL`), the rate from `rates
 | `GET /v1/risk/var` | 1-day VaR and expected shortfall at 95% / 99% by three methods: historical, filtered historical, delta-gamma-vega |
 | `GET /v1/risk/var/history?start=&end=` | VaR stored after each close (`risk_var`, schema 014) with the realised next-day P&L, breaches, Kupiec and Christoffersen tests per method |
 | `POST /v1/risk/var/run` | Store this session's VaR if it is due |
+| `POST /v1/risk/what-if` | Body `{"legs": [{strike, option_type, expiry, side, quantity}]}`: the candidate priced at the mids, the capital it would hold (simulator rules) vs what is available, and Greeks, filtered-historical VaR / shortfall and the worst stress and replayed day before and after adding it (`app/services/whatif.py`) |
 | `GET /v1/risk/greeks` | Delta, gamma, vega, theta in dollars, plus P&L per 1% SPX move from delta and from gamma: totals, by expiry, per position (with the IV used, its source, the model price and the mid) |
 
 How positions are priced (`app/services/exposure.py`, Black-Scholes-Merton in `app/services/pricing.py`): each expiry

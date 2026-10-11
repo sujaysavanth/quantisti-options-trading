@@ -125,6 +125,36 @@ export const fetchGreeks = () => get<Greeks>(STATS_API, '/v1/risk/greeks');
 export const fetchStress = () => get<Stress>(STATS_API, '/v1/risk/stress');
 export const fetchVar = () => get<VarNow>(STATS_API, '/v1/risk/var');
 export const fetchVarHistory = () => get<VarHistory>(STATS_API, '/v1/risk/var/history');
+export type WhatIfMetric = { metric: string; before: number | null; after: number | null; change: number | null };
+export type WhatIf = {
+  open_trades: number;
+  candidate: { expiry: string; strike: number; option_type: string; side: string; quantity: number; entry_price: number; price_source: 'mid' | 'model' }[];
+  capital: { required: number | null; basis: string | null; available_now: number; available_after: number | null; fits: boolean | null };
+  metrics: WhatIfMetric[];
+};
+export type CandidateLeg = { strike: number; option_type: 'CALL' | 'PUT'; expiry: string; side: 'BUY' | 'SELL'; quantity: number };
+
+export async function postWhatIf(legs: CandidateLeg[]): Promise<WhatIf> {
+  const response = await fetch(`${STATS_API}/v1/risk/what-if`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ legs }), cache: 'no-store',
+  });
+  if (!response.ok) throw new Error(await errorText(response));
+  return (await response.json()) as WhatIf;
+}
+
+/** How each what-if metric is labelled, and whether a bigger number is better (for colouring the change). */
+export const WHAT_IF_LABELS: Record<string, { label: string; higherIsBetter: boolean | null }> = {
+  delta: { label: 'Delta ($ per SPX point)', higherIsBetter: null },
+  gamma_1pct: { label: 'Gamma ($ on a 1% move)', higherIsBetter: null },
+  vega: { label: 'Vega ($ per vol point)', higherIsBetter: null },
+  theta: { label: 'Theta ($ per day)', higherIsBetter: true },
+  var95: { label: 'VaR 95%, 1 day', higherIsBetter: false },
+  var99: { label: 'VaR 99%, 1 day', higherIsBetter: false },
+  es99: { label: 'Expected shortfall 99%', higherIsBetter: false },
+  worst_stress: { label: 'Worst stress scenario', higherIsBetter: true },
+  worst_day: { label: 'Worst replayed SPX day', higherIsBetter: true },
+};
+
 export const tradesCsvUrl = (status: 'closed' | 'all' = 'all') => `${PORTFOLIO_API}/v1/portfolio/trades.csv?status=${status}`;
 
 export type EquityPoint = { t: string; value: number; spx: number | null; drawdown: number };

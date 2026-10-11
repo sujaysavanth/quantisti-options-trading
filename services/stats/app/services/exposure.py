@@ -94,7 +94,11 @@ class Market:
 
 
 def portfolio_greeks(positions: Sequence[Mapping[str, Any]], quote: Mapping[str, Any], rate: float) -> Dict[str, Any]:
-    market = Market(quote, rate)
+    return market_greeks(positions, Market(quote, rate))
+
+
+def market_greeks(positions: Sequence[Mapping[str, Any]], market: Market) -> Dict[str, Any]:
+    rate = market.rate
     pct = market.spot / 100
 
     rows, unpriced = [], []

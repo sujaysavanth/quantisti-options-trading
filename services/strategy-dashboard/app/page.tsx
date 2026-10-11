@@ -13,6 +13,7 @@ import { fitStrategy, rankStrategies, stickyPick } from '@/data/recommend';
 import { PayoffChart } from '@/components/PayoffChart';
 import { GreekStats } from '@/components/GreekStats';
 import { RiskPanel } from '@/components/RiskPanel';
+import { WhatIfPanel } from '@/components/WhatIfPanel';
 import { StrategyTable } from '@/components/StrategyTable';
 import { OptionBreakdown } from '@/components/OptionBreakdown';
 import type { OptionLeg, StrategyRecommendation } from '@/data/types';
@@ -347,6 +348,7 @@ export default function Page() {
             <PayoffChart strategy={selected} leg={selectedLeg} bands={bands} spot={spot} />
             <OptionBreakdown strategy={selected} selectedLeg={selectedLeg} onSelectLeg={setSelectedLeg} />
             <RiskPanel strategy={selected} />
+            <WhatIfPanel strategy={selected} />
             <GreekStats greeks={greeks} name={selected?.name} legs={selected?.legs.length ?? 0} />
           </>
         )}
