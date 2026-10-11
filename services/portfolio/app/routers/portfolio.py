@@ -2,6 +2,7 @@
 
     GET  /v1/portfolio/positions         open positions netted by contract, plus the open trades behind them
     GET  /v1/portfolio/equity            stored snapshots (?kind=close|intraday, ?start=, ?end=, ?positions=true)
+    GET  /v1/portfolio/performance       returns, Sharpe/Sortino, drawdown, vs SPX, trade stats (?start=, ?end=)
     GET  /v1/portfolio/trades            trade history (?status=closed|open|all, default closed)
     GET  /v1/portfolio/trades.csv        the same history, one row per leg
     POST /v1/portfolio/snapshots/run     take the snapshot due now, if any (the background task does this every minute)
@@ -13,8 +14,11 @@ from typing import Literal, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from .. import market_spec
 from ..clients import MarketStreamClient, SimulatorClient
+from ..services import market_history
 from ..services import positions as views
+from ..services.performance import performance as compute_performance
 from ..services.schedule import due
 from ..services.snapshots import SnapshotStore, take_due
 
@@ -54,6 +58,25 @@ def equity(request: Request, kind: Optional[Literal["close", "intraday"]] = None
            end: Optional[date] = None, positions: bool = False):
     rows = _store(request).list(kind, start, end, positions)
     return {"count": len(rows), "snapshots": rows}
+
+
+@router.get("/performance", summary="Performance of the paper account (close snapshots + closed trades)")
+async def performance(request: Request, start: Optional[date] = None, end: Optional[date] = None):
+    account = await SimulatorClient().account()
+    if account is None:
+        raise HTTPException(status_code=502, detail="Simulator unavailable: paper account can't be read.")
+    snaps = _store(request).list("close", start, end, False)
+
+    def closed_on(t: dict) -> date:
+        return datetime.fromisoformat(t["closed_at"].replace("Z", "+00:00")).astimezone(market_spec.TZ).date()
+
+    closed = [t for t in _filter(await _trades(), "closed")
+              if (start is None or closed_on(t) >= start) and (end is None or closed_on(t) <= end)]
+    spx, rates = {}, []
+    if snaps:
+        first, last = snaps[0]["session"], snaps[-1]["session"]
+        spx, rates = market_history.spx_closes(first, last), market_history.rates(first, last)
+    return compute_performance(snaps, closed, float(account["starting_balance"]), rates, spx)
 
 
 @router.get("/trades", summary="Trade history")
