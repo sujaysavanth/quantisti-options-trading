@@ -20,8 +20,10 @@ import math
 import numpy as np
 import pandas as pd
 
-from ..evaluation.metrics import regime_of
+from ..evaluation.metrics import REGIMES, regime_of
 from ..evaluation.walkforward import QCOLS
+
+REGIME_LABELS = [label for label, _, _ in REGIMES]
 
 MIN_POINTS = 30
 BANDS = (("q10", "q90", 0.80), ("q05", "q95", 0.90))
@@ -40,6 +42,33 @@ def _scores(rows: pd.DataFrame, lo: str, hi: str) -> np.ndarray:
     width = (rows[hi] - rows[lo]).to_numpy()
     y = rows["close_ret"].to_numpy()
     return np.maximum(rows[lo].to_numpy() - y, y - rows[hi].to_numpy()) / width
+
+
+def regime_adjustments(history: pd.DataFrame, min_points: int = MIN_POINTS) -> dict:
+    """Adjustments learned from one forecaster's out-of-sample history, for forecasting the weeks after it:
+    {regime: {"q10-q90": adj, "q05-q95": adj}}, plus "all" (pooled) used for a regime with too few weeks."""
+    h = history.dropna(subset=QCOLS).copy()
+    h["regime"] = regime_of(h["vix_close"].to_numpy(dtype=float))
+    out = {}
+    for key, rows in [("all", h), *((r, h[h["regime"] == r]) for r in REGIME_LABELS)]:
+        if len(rows) >= min_points:
+            out[key] = {f"{lo}-{hi}": adjustment(_scores(rows, lo, hi), cov) for lo, hi, cov in BANDS}
+    return out
+
+
+def apply_adjustments(q: np.ndarray, vix: np.ndarray, adjustments: dict) -> np.ndarray:
+    """Apply regime_adjustments to quantile forecasts (columns in QCOLS order); returns sorted quantiles."""
+    q = q.copy()
+    index = {c: i for i, c in enumerate(QCOLS)}
+    for row, regime in enumerate(regime_of(np.asarray(vix, dtype=float))):
+        adj = adjustments.get(regime) or adjustments.get("all")
+        if not adj:
+            continue
+        for lo, hi, _ in BANDS:
+            a, (i, j) = adj[f"{lo}-{hi}"], (index[lo], index[hi])
+            width = q[row, j] - q[row, i]
+            q[row, i], q[row, j] = q[row, i] - a * width, q[row, j] + a * width
+    return np.sort(q, axis=1)
 
 
 def conformalize(preds: pd.DataFrame, min_points: int = MIN_POINTS) -> pd.DataFrame:

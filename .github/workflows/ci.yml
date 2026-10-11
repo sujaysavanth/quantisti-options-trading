@@ -23,8 +23,8 @@ jobs:
     strategy:
       fail-fast: false            # show every failing service, not just the first
       matrix:
-        # Services with tests. gateway, portfolio, stats and explain are health-only stubs (built below).
-        service: [market, simulator, ml, ingest]
+        # Services with tests. gateway and explain are health-only stubs (built below).
+        service: [market, simulator, ml, ingest, portfolio, stats]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -108,6 +108,9 @@ jobs:
       - name: Install
         working-directory: ${{ matrix.app }}
         run: npm ci
+      - name: Unit tests
+        working-directory: ${{ matrix.app }}
+        run: npm test --if-present
       - name: Build (includes the TypeScript type check)
         working-directory: ${{ matrix.app }}
         run: npm run build

@@ -7,6 +7,7 @@ Purpose:
     - Integrates with Market Data service for option pricing
 """
 
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -15,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .db.connection import initialize_pool, close_db_connection
 from .routers import backtests, health, live_strategies, paper, strategies
+from .services.market_stream_client import MarketStreamClient
 from .services.paper_store import PaperTradeStore
 
 # Configure logging
@@ -65,12 +67,30 @@ async def startup_event():
         logger.error(f"Failed to initialize database: {e}")
         # Don't crash the service - allow it to start and report errors via health check
     app.state.paper_store = PaperTradeStore()
+    app.state.settler = asyncio.create_task(_settle_forever(app.state.paper_store))
+
+
+SETTLE_CHECK_SECONDS = 60
+
+
+async def _settle_forever(store: PaperTradeStore) -> None:
+    """Every minute: close paper trades whose settlement time (30 min before their expiry's close) has come."""
+    client = MarketStreamClient()
+    while True:
+        try:
+            await paper.settle_due(store, client)
+        except Exception:
+            logger.exception("paper settlement check failed")
+        await asyncio.sleep(SETTLE_CHECK_SECONDS)
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close connections on shutdown."""
     logger.info("Shutting down Strategy Simulator Service")
+    settler = getattr(app.state, "settler", None)
+    if settler:
+        settler.cancel()
     try:
         close_db_connection()
         logger.info("Database connections closed")

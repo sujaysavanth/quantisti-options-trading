@@ -1,239 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveQuote } from '@/components/LiveQuoteProvider';
-import { defaultExpiry, expiryLabel, pct, quoteExpiries } from '@/data/live';
-import { StrategySummary } from '@/components/StrategySummary';
+import { defaultExpiry, expiryLabel, pct, quoteExpiries, type LiveLeg } from '@/data/live';
+import { ForecastPanel } from '@/components/ForecastPanel';
+import { MarketContext } from '@/components/MarketContext';
+import { WhyThisRange } from '@/components/WhyThisRange';
+import { PaperBook } from '@/components/PaperBook';
+import { errorText } from '@/data/paper';
+import { RecommendationCard } from '@/components/RecommendationCard';
+import { fitStrategy, rankStrategies, stickyPick } from '@/data/recommend';
 import { PayoffChart } from '@/components/PayoffChart';
 import { GreekStats } from '@/components/GreekStats';
-import { MarginInsights } from '@/components/MarginInsights';
+import { RiskPanel } from '@/components/RiskPanel';
+import { WhatIfPanel } from '@/components/WhatIfPanel';
 import { StrategyTable } from '@/components/StrategyTable';
 import { OptionBreakdown } from '@/components/OptionBreakdown';
-import { dashboardMock, type StrategyRecommendation, type OptionLeg } from '@/data/mockDashboard';
-import { MULTIPLIER, optionCode, shortDate, usd } from '@/data/format';
+import type { OptionLeg, StrategyRecommendation } from '@/data/types';
+import { optionCode } from '@/data/format';
+import { legPl, payoffCurve, payoffStats } from '@/data/payoff';
+import { priceAt, rescale, type QuantileForecast } from '@/data/distribution';
+import { positionGreeks } from '@/data/greeks';
+import {
+  conditionExpiry, fetchChainSentiment, fetchExpiries, fetchLatestFeatures, fetchMonitoring, fetchVix, fetchWeekly, fractionLeft,
+  type ChainSentiment, type ExpiryForecasts, type LatestFeatures, type Monitoring, type VixNow, type WeeklyForecast,
+} from '@/data/forecast';
 
 const SIM_API = process.env.NEXT_PUBLIC_SIMULATOR_API ?? 'http://localhost:8082';
-const STREAM_API = process.env.NEXT_PUBLIC_MARKET_STREAM_API ?? 'http://localhost:8090';
-// Live strategies place strikes this far apart (SPX points, on the 5-point grid).
-const WING = 25;
-
-type MarketLegQuote = {
-  identifier?: string;
-  strike: number;
-  option_type: 'CALL' | 'PUT';
-  expiry: string;
-  bid?: number;
-  ask?: number;
-  last?: number;
-  iv?: number;
-};
-
-type MarketQuoteSnapshot = {
-  symbol: string;
-  last_price: number;
-  legs: MarketLegQuote[];
-};
-
-const getPremium = (leg: MarketLegQuote) =>
-  leg.last ?? leg.bid ?? leg.ask ?? 0;
-
-const toOptionLeg = (leg: MarketLegQuote, action: 'BUY' | 'SELL'): OptionLeg => ({
-  identifier: leg.identifier,
-  action,
-  optionType: leg.option_type,
-  strike: leg.strike,
-  expiry: leg.expiry,
-  premium: getPremium(leg),
-  projectedPl: 0,
-  marginImpact: 0,
-  payoffPoints: []
-});
-
-const findLeg = (legs: MarketLegQuote[], target: number, direction: 'above' | 'below') => {
-  const filtered =
-    direction === 'above'
-      ? legs.filter((leg) => leg.strike >= target)
-      : legs.filter((leg) => leg.strike <= target);
-  if (!filtered.length) {
-    return undefined;
-  }
-  return filtered.reduce((prev, curr) =>
-    Math.abs(curr.strike - target) < Math.abs(prev.strike - target) ? curr : prev
-  );
-};
-
-const buildStrategiesFromQuote = (quote: MarketQuoteSnapshot): StrategyRecommendation[] => {
-  const legs = quote.legs ?? [];
-  if (!legs.length) {
-    return [];
-  }
-
-  const expiries = Array.from(
-    new Set(
-      legs
-        .map((leg) => leg.expiry)
-        .filter(Boolean)
-        .sort((a, b) => new Date(a).getTime() - new Date(b).getTime())
-    )
-  );
-
-  const activeExpiry = expiries[0];
-  const expiryLegs = legs.filter((leg) => leg.expiry === activeExpiry);
-  const callLegs = expiryLegs
-    .filter((leg) => leg.option_type === 'CALL')
-    .sort((a, b) => a.strike - b.strike);
-  const putLegs = expiryLegs
-    .filter((leg) => leg.option_type === 'PUT')
-    .sort((a, b) => a.strike - b.strike);
-
-  const strategies: StrategyRecommendation[] = [];
-  const price = quote.last_price;
-
-  const shortCall = findLeg(callLegs, price + WING, 'above');
-  const longCall = shortCall ? findLeg(callLegs, shortCall.strike + WING, 'above') : undefined;
-  const shortPut = findLeg(putLegs, price - WING, 'below');
-  const longPut = shortPut ? findLeg(putLegs, shortPut.strike - WING, 'below') : undefined;
-
-  if (shortCall && longCall && shortPut && longPut) {
-    const condorLegs = [
-      toOptionLeg(shortCall, 'SELL'),
-      toOptionLeg(longCall, 'BUY'),
-      toOptionLeg(shortPut, 'SELL'),
-      toOptionLeg(longPut, 'BUY')
-    ];
-    const netCredit = condorLegs.reduce(
-      (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
-      0
-    );
-    const expectedPl = Math.round(netCredit * MULTIPLIER);
-    const wingWidth = Math.min(longCall.strike - shortCall.strike, shortPut.strike - longPut.strike);
-    const maxLoss = Math.round(Math.max(wingWidth * MULTIPLIER - expectedPl, 0));
-    strategies.push({
-      name: 'Live Iron Condor',
-      type: 'Neutral Income',
-      strikes: `${shortPut.strike} / ${shortCall.strike}`,
-      expectedPl,
-      maxLoss,
-      winProbability: 0.65,
-      riskReward: wingWidth > 0 ? (expectedPl / (wingWidth * MULTIPLIER - expectedPl + 1e-6)) : 1.5,
-      margin: wingWidth * MULTIPLIER,
-      score: 88,
-      payoffPoints: [],
-      legs: condorLegs
-    });
-  }
-
-  if (shortPut && longPut) {
-    const spreadLegs = [toOptionLeg(shortPut, 'SELL'), toOptionLeg(longPut, 'BUY')];
-    const netCredit = spreadLegs.reduce(
-      (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
-      0
-    );
-    const expectedPl = Math.round(netCredit * MULTIPLIER);
-    const strikeDiff = shortPut.strike - longPut.strike;
-    const maxLoss = Math.round(Math.max(strikeDiff * MULTIPLIER - expectedPl, 0));
-    strategies.push({
-      name: 'Live Bull Put Spread',
-      type: 'Directional Credit',
-      strikes: `${shortPut.strike} / ${longPut.strike}`,
-      expectedPl,
-      maxLoss,
-      winProbability: 0.7,
-      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * MULTIPLIER - expectedPl + 1e-6)) : 1.2,
-      margin: strikeDiff * MULTIPLIER,
-      score: 80,
-      payoffPoints: [],
-      legs: spreadLegs
-    });
-  }
-
-  if (shortCall && longCall) {
-    const spreadLegs = [toOptionLeg(shortCall, 'SELL'), toOptionLeg(longCall, 'BUY')];
-    const netCredit = spreadLegs.reduce(
-      (sum, leg) => sum + (leg.action === 'SELL' ? leg.premium : -leg.premium),
-      0
-    );
-    const expectedPl = Math.round(netCredit * MULTIPLIER);
-    const strikeDiff = longCall.strike - shortCall.strike;
-    const maxLoss = Math.round(Math.max(strikeDiff * MULTIPLIER - expectedPl, 0));
-    strategies.push({
-      name: 'Live Bear Call Spread',
-      type: 'Directional Credit',
-      strikes: `${shortCall.strike} / ${longCall.strike}`,
-      expectedPl,
-      maxLoss,
-      winProbability: 0.62,
-      riskReward: strikeDiff > 0 ? (expectedPl / (strikeDiff * MULTIPLIER - expectedPl + 1e-6)) : 1.1,
-      margin: strikeDiff * MULTIPLIER,
-      score: 76,
-      payoffPoints: [],
-      legs: spreadLegs
-    });
-  }
-
-  return strategies.sort((a, b) => b.expectedPl - a.expectedPl);
-};
-
-const computeLegPl = (leg: OptionLeg, price: number) => {
-  const qty = leg.quantity ?? 1;
-  const premium = leg.premium ?? 0;
-  const intrinsic =
-    leg.optionType === 'CALL' ? Math.max(price - leg.strike, 0) : Math.max(leg.strike - price, 0);
-  const raw = intrinsic - premium;
-  return raw * MULTIPLIER * (leg.action === 'BUY' ? 1 : -1) * qty;
-};
-
-const buildPayoff = (legs: OptionLeg[], spot: number) => {
-  if (!legs.length) return [];
-  const strikes = legs.map((l) => l.strike);
-  const min = Math.min(spot, ...strikes) - 150;
-  const max = Math.max(spot, ...strikes) + 150;
-  const step = 5;
-  const points: Array<{ price: number; pl: number }> = [];
-  for (let p = min; p <= max; p += step) {
-    const pl = legs.reduce((sum, leg) => sum + computeLegPl(leg, p), 0);
-    points.push({ price: Math.round(p), pl: Math.round(pl) });
-  }
-  return points;
-};
-
-const trendMessages = [
-  'Range-bound consolidation',
-  'Mild uptrend with acceleration',
-  'Volatility spike likely',
-  'Bearish drift with short-covering risk',
-  'Sideways with bullish bias'
-];
-
-const generateSummaryFromQuote = (quote: MarketQuoteSnapshot, fallbackExpiry: string) => {
-  const midpoint = quote.last_price;
-  const randomMove = Math.max(0.01 * midpoint, Math.random() * 0.03 * midpoint);
-  const lower = Math.round(midpoint - randomMove);
-  const upper = Math.round(midpoint + randomMove);
-  const confidence = 60 + Math.round(Math.random() * 30);
-  const predictedClose = Math.round(midpoint + (Math.random() - 0.5) * randomMove * 0.5);
-
-  const expiry =
-    quote.legs?.[0]?.expiry
-      ? shortDate(quote.legs[0].expiry)
-      : fallbackExpiry;
-
-  return {
-    weekOf: shortDate(new Date()),
-    expiry,
-    predictedRange: {
-      lower,
-      upper,
-      confidence
-    },
-    closingPriceEstimate: predictedClose,
-    context: {
-      vix: Number((12 + Math.random() * 5).toFixed(1)),
-      oiPcr: Number((0.8 + Math.random() * 0.5).toFixed(2)),
-      trend: trendMessages[Math.floor(Math.random() * trendMessages.length)]
-    }
-  };
-};
 
 /** The selected expiry lives in the URL (?expiry=2026-10-09) so a reload or shared link keeps it. */
 const readExpiryParam = () =>
@@ -246,32 +39,42 @@ const writeExpiryParam = (expiry: string | null) => {
   window.history.replaceState(null, '', url);
 };
 
-interface PaperTrade {
-  id: string;
-  symbol: string;
-  nickname?: string;
-  created_at: string;
-  entry_notional: number;
-  current_notional: number;
-  pnl: number;
-  legs: Array<{
-    identifier?: string;
-    strike: number;
-    option_type: string;
-    expiry: string;
-    quantity: number;
-    side: string;
-    entry_price?: number;
-    current_price?: number;
-    pnl: number;
-  }>;
+
+/** The live quote's leg for a strategy leg: same OCC id, else same strike/type/expiry. */
+const quoteLeg = (legs: LiveLeg[], leg: { identifier?: string; strike: number; option_type: string; expiry: string }) =>
+  legs.find((q) => leg.identifier && q.identifier === leg.identifier) ??
+  legs.find((q) => q.strike === leg.strike && q.option_type === leg.option_type && q.expiry === leg.expiry);
+
+/** A /v1/strategies-live strategy, with metrics from its actual payoff and IV/delta from the live quote. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toStrategy(s: any, quoteLegs: LiveLeg[]): StrategyRecommendation {
+  const spot: number = s.spot_price ?? s.legs?.[0]?.strike ?? 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const legs: OptionLeg[] = (s.legs ?? []).map((leg: any) => {
+    const q = quoteLeg(quoteLegs, leg);
+    const optionLeg: OptionLeg = {
+      identifier: leg.identifier, action: leg.side, optionType: leg.option_type, strike: leg.strike,
+      expiry: leg.expiry, quantity: leg.quantity ?? 1, premium: leg.price ?? 0,
+      iv: q?.iv ?? null, delta: q?.delta ?? null, projectedPl: 0, payoffPoints: [],
+      halfSpread: q?.bid != null && q?.ask != null && q.ask >= q.bid ? (q.ask - q.bid) / 2 : null,
+    };
+    optionLeg.projectedPl = Math.round(legPl(optionLeg, spot));
+    optionLeg.payoffPoints = payoffCurve([optionLeg], spot);
+    return optionLeg;
+  });
+  const stats = payoffStats(legs);
+  return {
+    name: s.name, type: s.category, expiry: s.expiry ?? legs[0]?.expiry ?? '',
+    strikes: legs.map((l) => `${l.strike} ${optionCode(l.optionType)}`).join(' / '),
+    ...stats, payoffPoints: payoffCurve(legs, spot), legs, forecast: null,
+  };
 }
 
 export default function Page() {
   const [strategies, setStrategies] = useState<StrategyRecommendation[]>([]);
-  const [selected, setSelected] = useState<StrategyRecommendation | null>(null);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
   const [selectedLeg, setSelectedLeg] = useState<OptionLeg | null>(null);
-  const [orders, setOrders] = useState<PaperTrade[]>([]);
+  const [paperRefresh, setPaperRefresh] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [sendMessage, setSendMessage] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -281,6 +84,14 @@ export default function Page() {
   // null = "whatever the quote's default is"; set when the user picks one (or from ?expiry=).
   const [expiry, setExpiry] = useState<string | null>(null);
   const [expiryReady, setExpiryReady] = useState(false);
+
+  const [forecast, setForecast] = useState<WeeklyForecast | null>(null);
+  const [monitoring, setMonitoring] = useState<Monitoring | null>(null);
+  const [expiryForecasts, setExpiryForecasts] = useState<ExpiryForecasts | null>(null);
+  const [forecastStatus, setForecastStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [features, setFeatures] = useState<LatestFeatures | null>(null);
+  const [vix, setVix] = useState<VixNow | null>(null);
+  const [sentiment, setSentiment] = useState<ChainSentiment | null>(null);
 
   useEffect(() => {
     setExpiry(readExpiryParam());
@@ -292,55 +103,58 @@ export default function Page() {
     setExpiry(next);
     writeExpiryParam(next);
   };
-  const [summary, setSummary] = useState({
-    weekOf: dashboardMock.weekOf,
-    expiry: dashboardMock.expiry,
-    predictedRange: dashboardMock.predictedRange,
-    closingPriceEstimate: dashboardMock.closingPriceEstimate,
-    context: dashboardMock.context
-  });
 
-  const handleSelect = (strategy: StrategyRecommendation) => {
-    setSelected(strategy);
-    setSelectedLeg(null);
-  };
-
-  const handleLegSelect = (leg: OptionLeg) => setSelectedLeg(leg);
-
-  const selectedName = selected?.name;
-  const fetchOrders = useCallback(async () => {
-    try {
-      const response = await fetch(`${SIM_API}/v1/paper/orders`, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch orders: ${response.status}`);
-      }
-      const data = (await response.json()) as PaperTrade[];
-      setOrders(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }, []);
-
-  // Keep summary in sync with live quote
+  // The weekly forecast, its track record and the latest weekly features: they change once a week.
   useEffect(() => {
-    const loadSummary = async () => {
+    const load = async () => {
       try {
-        const response = await fetch(`${STREAM_API}/v1/quotes/SPX`, { cache: 'no-store' });
-        if (!response.ok) return;
-        const data = (await response.json()) as MarketQuoteSnapshot;
-        if (data?.legs?.length) {
-          setSummary(generateSummaryFromQuote(data, dashboardMock.expiry));
-        }
+        const [w, m] = await Promise.all([fetchWeekly(), fetchMonitoring()]);
+        setForecast(w);
+        setMonitoring(m);
+        setForecastStatus('ready');
       } catch (err) {
-        console.error('Failed to load live summary', err);
+        console.error('Weekly forecast unavailable', err);
+        setForecastStatus('unavailable');
+      }
+      try {
+        setExpiryForecasts(await fetchExpiries());
+      } catch (err) {
+        console.error('Expiry forecasts unavailable', err);
+        setExpiryForecasts(null);
+      }
+      try {
+        const f = await fetchLatestFeatures();
+        setFeatures(f);
+        setVix(await fetchVix(f));
+      } catch (err) {
+        console.error('Latest features unavailable', err);
+        setVix(await fetchVix(null).catch(() => null));
       }
     };
-    loadSummary();
-    const id = setInterval(loadSummary, 60000);
+    load();
+    const id = setInterval(load, 5 * 60_000);
     return () => clearInterval(id);
   }, []);
 
-  // Fetch live strategies from simulator for the selected expiry
+  // Live VIX and the selected expiry's put/call ratio.
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setSentiment(await fetchChainSentiment(expiry ?? defaultExpiry(quote)));
+      } catch (err) {
+        console.error('Chain sentiment unavailable', err);
+        setSentiment(null);
+      }
+      const v = await fetchVix(features).catch(() => null);
+      if (v) setVix(v);
+    };
+    load();
+    const id = setInterval(load, 2 * 60_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiry, quote?.default_expiry, features?.anchor_date]);
+
+  // Live strategies from the simulator for the selected expiry.
   useEffect(() => {
     if (!expiryReady) return;
     const loadStrategies = async () => {
@@ -356,112 +170,80 @@ export default function Page() {
         }
         if (!response.ok) {
           setStrategies([]);
-          setSelected(null);
           setFeedStatus('waiting');
           return;
         }
-        const liveStrategies = (await response.json()) as any[];
-        setFeedStatus(liveStrategies.length ? 'live' : 'waiting');
-        const mapped: StrategyRecommendation[] = liveStrategies.map((s) => {
-          const legs: OptionLeg[] = (s.legs ?? []).map((leg: any) => {
-            const premium = leg.price ?? 0;
-            return {
-              identifier: leg.identifier,
-              action: leg.side,
-              optionType: leg.option_type,
-              strike: leg.strike,
-              expiry: leg.expiry,
-              quantity: leg.quantity ?? 1,
-              premium,
-              projectedPl: 0,
-              marginImpact: 0,
-              payoffPoints: []
-            };
-          });
-
-          const strikesLabel = legs.map((l) => `${l.strike} ${optionCode(l.optionType)}`).join(' / ');
-          const spot = s.spot_price ?? legs[0]?.strike ?? 0;
-          const payoffPoints = buildPayoff(legs, spot);
-          const plValues = payoffPoints.map((p) => p.pl);
-          const maxProfit = plValues.length ? Math.max(...plValues) : 0;
-          const maxLossAbs = plValues.length ? Math.abs(Math.min(...plValues)) : 0;
-          const netPremium = legs.reduce(
-            (sum, leg) => sum + (leg.action === 'SELL' ? 1 : -1) * (leg.premium ?? 0) * MULTIPLIER,
-            0
-          );
-          const expectedPl = Math.round(maxProfit || netPremium);
-          const maxLoss = s.max_loss !== null && s.max_loss !== undefined
-            ? Math.round(Number(s.max_loss) * MULTIPLIER)
-            : Math.round(maxLossAbs || Math.abs(netPremium) || 0);
-          const riskReward = maxLoss ? expectedPl / (maxLoss || 1) : 1;
-
-          // Per-leg projected P&L at spot and margin attribution
-          const totalMargin = s.margin ? Number(s.margin) : maxLoss;
-          const totalShortQty = legs.reduce(
-            (sum, leg) => sum + (leg.action === 'SELL' ? (leg.quantity ?? 1) : 0),
-            0
-          );
-          legs.forEach((leg) => {
-            const qty = leg.quantity ?? 1;
-            leg.projectedPl = computeLegPl(leg, spot);
-            const marginUnit = totalShortQty ? totalMargin / totalShortQty : totalMargin;
-            leg.marginImpact =
-              leg.action === 'SELL' ? Math.max(Math.round(marginUnit * qty), 0) : 0;
-            leg.payoffPoints = buildPayoff([leg], spot);
-          });
-
-          return {
-            name: s.name,
-            type: s.category,
-            strikes: strikesLabel,
-            expectedPl,
-            maxLoss,
-            winProbability: 0.5,
-            riskReward,
-            margin: totalMargin,
-            score: 80,
-            payoffPoints,
-            legs
-          };
-        });
-
-        setStrategies(mapped);
-        setSelected((current) => {
-          if (!mapped.length) return null;
-          if (current) {
-            const match = mapped.find((s) => s.name === current.name);
-            return match ?? mapped[0];
-          }
-          return mapped[0];
-        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const live = (await response.json()) as any[];
+        setFeedStatus(live.length ? 'live' : 'waiting');
+        setStrategies(live.map((s) => toStrategy(s, quote?.legs ?? [])));
       } catch (err) {
         console.error('Failed to load live strategies from simulator', err);
         setStrategies([]);
-        setSelected(null);
         setFeedStatus('waiting');
       }
     };
     loadStrategies();
     const id = setInterval(loadStrategies, 30000);
     return () => clearInterval(id);
-  }, [expiry, expiryReady]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiry, expiryReady, quote?.quoted_at]);
 
+  // Probability of profit and expected P&L for the shown expiry, from its own forecast (GARCH from the latest
+  // close, ml /v1/predict/expiries; the weekly forecast is the fallback for its own expiry). Everything is taken
+  // at the moment of the option quotes, not now: the chain is ~15 minutes delayed while the index updates every
+  // minute, and mixing the two moments makes options look mispriced by however far SPX moved in between. The
+  // centre is that expiry's put-call-parity forward; sessions already traded are removed from the variance.
+  const spot = quote?.last_price ?? null;
+  const shownExpiry = strategies[0]?.expiry ?? expiry ?? defaultExpiry(quote) ?? null;
+  const chainSummary = quote?.expiries?.find((e) => e.expiry === shownExpiry);
+  const chainCentre = chainSummary?.forward ?? null;
+  const chainTime = chainSummary?.quoted_at ?? quote?.quoted_at ?? null;
+  const scoring = useMemo(() => {
+    const none = (reason: string | null) => ({ dist: null as QuantileForecast | null, intraday: false, reason, basis: null as string | null });
+    if (!shownExpiry) return none(null);
+    const at = chainTime ? new Date(chainTime) : new Date();
+    const centre = chainCentre ?? spot;
+    const ef = expiryForecasts?.expiries.find((e) => e.expiry_date === shownExpiry);
+    if (ef && centre) {
+      const c = conditionExpiry(ef, centre, at);
+      return { ...c, basis: `GARCH from the ${expiryLabel(expiryForecasts!.origin_date)} close, ${ef.sessions}-session horizon` };
+    }
+    if (forecast && shownExpiry === forecast.expiry_date) {
+      const base = { spot: forecast.spot, quantiles: forecast.served.quantiles };
+      const dist = rescale(base, centre ?? forecast.spot, fractionLeft(forecast.anchor_date, forecast.expiry_date, at));
+      return { dist, intraday: false, reason: null, basis: 'the weekly forecast, re-centred for the time left' };
+    }
+    return none(expiryForecasts
+      ? 'No forecast for this expiry: it is more than 10 sessions out.'
+      : 'Forecasts are unavailable (ml service on port 8085).');
+  }, [shownExpiry, chainCentre, chainTime, spot, expiryForecasts, forecast]);
+  const dist = scoring.dist;
+
+  const ranking = useMemo(() => {
+    if (!dist) return rankStrategies(strategies);
+    return rankStrategies(strategies.map((s) =>
+      s.expiry === shownExpiry ? { ...s, forecast: fitStrategy(s, dist, 'garch') } : s));
+  }, [strategies, dist, shownExpiry]);
+  const { ranked } = ranking;
+  // Sticky: a new leader must beat the current pick clearly (stickyPick) before the recommendation changes.
+  const lastPick = useRef<string | null>(null);
+  const pick = useMemo(() => stickyPick(ranking, lastPick.current), [ranking]);
   useEffect(() => {
-    fetchOrders();
-    const id = setInterval(fetchOrders, 15000);
-    return () => clearInterval(id);
-  }, [fetchOrders]);
+    lastPick.current = pick?.name ?? null;
+  }, [pick]);
 
-  const toIsoDate = (value: string) => {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString().slice(0, 10);
-    }
-    const fallback = new Date(`${value} UTC`);
-    if (!Number.isNaN(fallback.getTime())) {
-      return fallback.toISOString().slice(0, 10);
-    }
-    return value;
+  // The pick is selected until the user chooses another strategy.
+  const selected = ranked.find((s) => s.name === selectedName) ?? pick ?? ranked[0] ?? null;
+  const greeks = useMemo(() => (selected && spot ? positionGreeks(selected.legs, spot) : null), [selected, spot]);
+  const range = (lo: number, hi: number): [number, number] => [priceAt(dist!, lo), priceAt(dist!, hi)];
+  const bands = dist && shownExpiry
+    ? { range80: range(0.1, 0.9), range90: range(0.05, 0.95), expiry: shownExpiry }
+    : null;
+
+  const handleSelect = (strategy: StrategyRecommendation) => {
+    setSelectedName(strategy.name);
+    setSelectedLeg(null);
   };
 
   const handleSendToSimulator = async () => {
@@ -477,43 +259,21 @@ export default function Page() {
         symbol: 'SPX',
         nickname: selected.name,
         legs: selected.legs.map((leg) => ({
-          identifier: leg.identifier,
-          strike: leg.strike,
-          option_type: leg.optionType,
-          expiry: toIsoDate(leg.expiry),
-          quantity: 1,
-          side: leg.action,
+          identifier: leg.identifier, strike: leg.strike, option_type: leg.optionType,
+          expiry: leg.expiry.slice(0, 10), quantity: 1, side: leg.action,
         })),
       };
       const response = await fetch(`${SIM_API}/v1/paper/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Simulator responded ${response.status}`);
-      }
-      setSendMessage('Strategy sent to simulator. View live P&L below or on the Paper console.');
-      fetchOrders();
-    } catch (err: any) {
+      if (!response.ok) throw new Error(await errorText(response));
+      setSendMessage('Strategy sent to the paper account. Its P&L, expiry and settle time are below.');
+      setPaperRefresh((n) => n + 1);
+    } catch (err: unknown) {
       console.error(err);
-      setSendError(err.message ?? 'Failed to send strategy to simulator');
+      setSendError(err instanceof Error ? err.message : 'Failed to send strategy to simulator');
     } finally {
       setIsSending(false);
-    }
-  };
-
-  const handleDeleteOrder = async (id: string) => {
-    try {
-      const response = await fetch(`${SIM_API}/v1/paper/orders/${id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        throw new Error(`Failed to delete trade (${response.status})`);
-      }
-      fetchOrders();
-    } catch (err) {
-      console.error(err);
-      setSendError('Failed to delete trade');
     }
   };
 
@@ -525,7 +285,7 @@ export default function Page() {
             <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Quantisti Research</p>
             <h1 className="text-4xl font-semibold">Weekly Strategy Intelligence</h1>
             <p className="text-slate-500 dark:text-slate-400 mt-2">
-              Insights generated from ML forecasts of price, volatility, and Greeks for the upcoming expiry.
+              Next week&apos;s SPX range forecast, applied to live (delayed) option strategies.
             </p>
           </div>
           {expiries.length > 0 && (
@@ -546,13 +306,34 @@ export default function Page() {
           )}
         </header>
 
-        <StrategySummary
-          weekOf={summary.weekOf}
-          expiry={summary.expiry}
-          predictedRange={summary.predictedRange}
-          closingPriceEstimate={summary.closingPriceEstimate}
-          context={summary.context}
-        />
+        <section className="grid gap-6 md:grid-cols-2">
+          <ForecastPanel forecast={forecast} monitoring={monitoring} status={forecastStatus} expiries={expiryForecasts} />
+          <MarketContext vix={vix} features={features} sentiment={sentiment} />
+        </section>
+
+        <WhyThisRange forecast={forecast} />
+
+        {feedStatus !== 'waiting' && (
+          <>
+            <RecommendationCard
+              pick={pick}
+              asOf={chainTime}
+              reason={scoring.reason}
+              basis={scoring.basis}
+              intraday={scoring.intraday}
+              onSelect={handleSelect}
+              selectedName={selected?.name}
+            />
+            <StrategyTable
+              strategies={ranked}
+              pickName={pick?.name}
+              selectedStrategy={selected?.name}
+              onSelect={handleSelect}
+              reason={scoring.reason}
+            />
+          </>
+        )}
+
         {feedStatus === 'waiting' ? (
           <section className="rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 p-10 text-center">
             <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Live strategies</p>
@@ -564,21 +345,21 @@ export default function Page() {
           </section>
         ) : (
           <>
-            <PayoffChart strategy={selected} leg={selectedLeg} />
-            <OptionBreakdown
-              strategy={selected}
-              selectedLeg={selectedLeg}
-              onSelectLeg={handleLegSelect}
-            />
+            <PayoffChart strategy={selected} leg={selectedLeg} bands={bands} spot={spot} />
+            <OptionBreakdown strategy={selected} selectedLeg={selectedLeg} onSelectLeg={setSelectedLeg} />
+            <RiskPanel strategy={selected} />
+            <WhatIfPanel strategy={selected} />
+            <GreekStats greeks={greeks} name={selected?.name} legs={selected?.legs.length ?? 0} />
           </>
         )}
+
         <section className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-lg shadow-slate-200/50 dark:shadow-black/30">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm uppercase tracking-wide text-slate-500 dark:text-slate-400">Simulator Bridge</p>
               <h3 className="text-2xl font-semibold">Place Dummy Trade</h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Sends the selected strategy to the simulator&apos;s paper-trading endpoint.
+                Sends the selected strategy (1 lot, at the mids) to the $30,000 paper account.
               </p>
             </div>
             <button
@@ -593,57 +374,13 @@ export default function Page() {
           {sendMessage && <p className="mt-3 text-sm text-emerald-500">{sendMessage}</p>}
           {sendError && <p className="mt-3 text-sm text-rose-500">{sendError}</p>}
           <div className="mt-6">
-            <h4 className="text-lg font-semibold mb-3">Live Paper Trades</h4>
-            {orders.length === 0 ? (
-              <p className="text-sm text-slate-500">No trades yet. Submit the strategy to create one.</p>
-            ) : (
-              <div className="space-y-3">
-                {orders.map((order) => (
-                  <div key={order.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4 bg-slate-50 dark:bg-slate-800/30">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold">{order.nickname || order.symbol}</p>
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          Created {new Date(order.created_at).toLocaleString()}
-                        </p>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <p className={order.pnl >= 0 ? 'text-emerald-500 font-semibold' : 'text-rose-400 font-semibold'}>
-                          {usd(order.pnl)}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteOrder(order.id)}
-                          className="text-xs text-slate-500 hover:text-rose-400"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                      {order.legs.map((leg, idx) => (
-                        <div key={`${order.id}-leg-${idx}`} className="flex justify-between">
-                          <span>
-                            {leg.side} {leg.quantity} × {leg.strike} {leg.option_type}
-                          </span>
-                          <span className={leg.pnl >= 0 ? 'text-emerald-500' : 'text-rose-400'}>
-                            {usd(leg.pnl)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            <PaperBook refreshKey={paperRefresh} />
           </div>
         </section>
-        <GreekStats />
-        <MarginInsights />
-        <StrategyTable strategies={strategies} selectedStrategy={selectedName} onSelect={handleSelect} />
 
         <footer className="text-center text-xs text-slate-500 dark:text-slate-400 pt-4 border-t border-slate-200 dark:border-slate-800">
-          Data shown is mock output for {dashboardMock.expiry}. Wire this UI to the ML service once the API is available.
+          Forecast: ml service (stored weekly at Friday&apos;s close). Quotes: CBOE, ~15 min delayed. VIX and put/call ratio:
+          market service. Payoffs and Greeks per 1 lot (x100).
         </footer>
       </div>
     </main>

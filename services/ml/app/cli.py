@@ -8,6 +8,12 @@
     python -m app.cli ablate --model gbm_sigma                     # which feature groups help (development years)
     python -m app.cli freeze --model gbm_quantile --groups vix,vix_term --conformal --reason "..."
     python -m app.cli holdout                                      # the frozen choice on 2021 on, once
+    python -m app.cli backfill-forecasts                           # 2021+ forecasts as monitoring history
+    python -m app.cli refresh-forecasts                            # forecast any new week now
+    python -m app.cli explain-backfill                             # explanations for live forecasts made before ML-6
+    python -m app.cli evaluate-horizons [--freeze]                 # expiry forecasts 1-10 sessions, 2014-2020
+    python -m app.cli horizons-holdout                             # the frozen horizons on 2021 on, once
+    python -m app.cli backfill-expiry-forecasts                    # 2021+ expiry forecasts as monitoring history
 
 From your machine add --database-url postgresql://quantisti:quantisti@localhost:5432/quantisti.
 """
@@ -80,8 +86,8 @@ def build_dataset(args) -> None:
 
 def default_reports_dir() -> Path:
     """data/ml/reports at the repo root (git-ignored) when run from a checkout, else under the working directory."""
-    root = Path(__file__).resolve().parents[3]
-    return (root if (root / "services").is_dir() else Path.cwd()) / "data" / "ml" / "reports"
+    from .tracking import data_dir
+    return data_dir() / "reports"
 
 
 def _load(args):
@@ -109,24 +115,33 @@ def evaluate(args) -> None:
     from .evaluation.baselines import all_baselines
     from .forecasting import experiments
 
+    from . import tracking
+
     data, ctx = _load(args)
     if args.models:
         groups = args.groups.split(",") if args.groups else None
-        _, summary = experiments.development(data, ctx, groups=groups)
-        stem = "models_dev" + ("_" + "_".join(groups) if groups else "")
-        paths = report.write(summary, _out(args), stem=stem, title="Models vs baselines: development years",
-                             intro=f"Models use feature groups: {', '.join(summary['groups'])}. Best baseline on these "
-                                   f"years: {summary['best_baseline']}. The holdout years (2021 on) are not in this "
-                                   "report; they are scored once, after `freeze`.")
+        params = {"period": "development", "groups": groups or "all", "research": args.research}
+        with tracking.run("evaluate-models", params, data) as mlf:
+            _, summary = experiments.development(data, ctx, groups=groups, research=args.research)
+            stem = "models_dev" + ("_" + "_".join(groups) if groups else "") + ("_research" if args.research else "")
+            paths = report.write(summary, _out(args), stem=stem, title="Models vs baselines: development years",
+                                 intro=f"Models use feature groups: {', '.join(summary['groups'])}. Best baseline on "
+                                       f"these years: {summary['best_baseline']}. The holdout years (2021 on) are not "
+                                       "in this report; they are scored once, after `freeze`.")
+            tracking.log_summary(mlf, summary)
+            tracking.log_files(mlf, paths)
         print("\n".join(report.table(summary["overall"])))
         print(f"\nbest baseline: {summary['best_baseline']}; significance (one-sided Diebold-Mariano):")
         _print_significance(summary)
     else:
         baselines = all_baselines()
         last_year = max(a.year for a in data["anchor_date"])
-        preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
-        summary = report.summarize(preds, [b.name for b in baselines])
-        paths = report.write(summary, _out(args))
+        with tracking.run("evaluate-baselines", {"first_test_year": args.first_test_year}, data) as mlf:
+            preds = walkforward.run(data, ctx, baselines, range(args.first_test_year, last_year + 1))
+            summary = report.summarize(preds, [b.name for b in baselines])
+            paths = report.write(summary, _out(args))
+            tracking.log_summary(mlf, summary)
+            tracking.log_files(mlf, paths)
         print("\n".join(report.table(summary["overall"])))
     print("\nwritten: " + ", ".join(str(p) for p in paths))
 
@@ -136,49 +151,144 @@ def ablate(args) -> None:
 
     from .forecasting import ablation, experiments
 
+    from . import tracking
+
     data, ctx = _load(args)
-    steps = experiments.run_ablation(data, ctx, model=args.model)
-    out = _out(args)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "ablation.json").write_text(json.dumps({"model": args.model, "steps": steps}, indent=2, default=str),
-                                       encoding="utf8")
+    with tracking.run("ablate", {"model": args.model, "period": "development"}, data) as mlf:
+        steps = experiments.run_ablation(data, ctx, model=args.model)
+        out = _out(args)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / f"ablation_{args.model}.json"
+        path.write_text(json.dumps({"model": args.model, "steps": steps}, indent=2, default=str), encoding="utf8")
+        if mlf:
+            mlf.log_param("kept_groups", ",".join(ablation.chosen_groups(steps)))
+            for i, step in enumerate(steps):
+                mlf.log_metric("pinball", float(step["pinball"]), step=i)
+            tracking.log_files(mlf, [path])
     print(f"\nkept groups for {args.model}: {', '.join(ablation.chosen_groups(steps))}")
-    print(f"written: {out / 'ablation.json'}")
+    print(f"written: {path}")
 
 
 def freeze(args) -> None:
+    from . import tracking
     from .evaluation import periods
     from .forecasting import experiments
 
     choice = {"model": args.model, "groups": args.groups.split(","), "conformal": args.conformal,
               "reference": args.reference, "reason": args.reason}
     data, ctx = _load(args)
-    _, dev = experiments.score_choice(data, ctx, choice, periods.DEV_YEARS, args.reference)
     name = experiments.chosen_name(choice)
-    choice["development"] = {"overall": dev["overall"][name], "significance": dev["significance"].get(name)}
-    record = periods.freeze(choice)
+    with tracking.run("freeze", {**choice, "period": "development"}, data) as mlf:
+        dev_preds, dev = experiments.score_choice(data, ctx, choice, periods.DEV_YEARS, args.reference)
+        choice["development"] = {"overall": dev["overall"][name], "significance": dev["significance"].get(name)}
+        tracking.log_summary(mlf, dev)
+        if mlf:
+            from .registry import register
+            forecaster, adjustments, train = experiments.fit_for_registry(data, ctx, choice, dev_preds)
+            example = train.drop(columns=[c for c in ("close_ret", "high_ret", "low_ret", "sessions", "next_anchor_date")
+                                          if c in train.columns]).tail(3)
+            choice["registered_version"] = register(mlf, forecaster, choice, adjustments, example)
+            choice["mlflow_run_id"] = mlf.active_run().info.run_id
+        record = periods.freeze(choice)
     print(f"frozen {name} on {', '.join(choice['groups'])} at {record['frozen_at']}: "
-          f"dev pinball {dev['overall'][name]['pinball'] * 100:.3f}, 80% hit {dev['overall'][name]['coverage_80']:.1%}")
+          f"dev pinball {dev['overall'][name]['pinball'] * 100:.3f}, 80% hit {dev['overall'][name]['coverage_80']:.1%}"
+          + (f"; registered as {tracking.REGISTERED_MODEL} v{choice['registered_version']}"
+             if choice.get("registered_version") else ""))
     print(f"written: {periods.CHOICE_FILE}")
 
 
 def holdout(args) -> None:
+    from . import tracking
     from .evaluation import periods, report
     from .forecasting import experiments
 
     choice = periods.holdout_allowed(force=args.force)
     data, ctx = _load(args)
     years = periods.holdout_years(max(a.year for a in data["anchor_date"]))
-    print(f"holdout {years.start}-{years.stop - 1}, frozen choice: {experiments.chosen_name(choice)} "
-          f"on {', '.join(choice['groups'])}")
-    _, summary = experiments.score_choice(data, ctx, choice, years, choice.get("reference"))
     name = experiments.chosen_name(choice)
-    paths = report.write(summary, _out(args), stem="holdout", title="Holdout: the frozen choice, scored once",
-                         intro=f"Frozen choice: {name} on {', '.join(choice['groups'])} (frozen {choice['frozen_at']}).")
+    print(f"holdout {years.start}-{years.stop - 1}, frozen choice: {name} on {', '.join(choice['groups'])}")
+    params = {"model": name, "groups": choice["groups"], "period": "holdout", "forced_rerun": args.force}
+    with tracking.run("holdout", params, data) as mlf:
+        _, summary = experiments.score_choice(data, ctx, choice, years, choice.get("reference"))
+        paths = report.write(summary, _out(args), stem="holdout", title="Holdout: the frozen choice, scored once",
+                             intro=f"Frozen choice: {name} on {', '.join(choice['groups'])} "
+                                   f"(frozen {choice['frozen_at']}).")
+        tracking.log_summary(mlf, summary)
+        tracking.log_files(mlf, paths)
     periods.record_holdout({"overall": summary["overall"], "significance": summary["significance"]})
     print("\n".join(report.table(summary["overall"])))
     _print_significance(summary)
     print("\nwritten: " + ", ".join(str(p) for p in paths) + f", {periods.CHOICE_FILE}")
+
+
+def backfill_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.backfill(conn)
+    print(f"stored {n} backfilled forecasts (2021 on, walk-forward with yearly refits, origin 'backfill')")
+
+
+def refresh_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        result = serving.refresh(conn, log_fn=print)
+    print(result)
+
+
+def explain_backfill(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.explain_missing(conn)
+    print(f"added {n} explanations to live forecasts that had none")
+
+
+def evaluate_horizons(args) -> None:
+    from .evaluation import periods
+    from .forecasting import horizons, serving
+    with psycopg2.connect(args.database_url) as conn:
+        data = serving.horizon_data(conn)
+    preds = horizons.walk_forward(data, periods.DEV_YEARS, log=print)
+    result = horizons.evaluate(preds)
+    text = horizons.report(result, "Expiry forecasts by horizon, development years 2014-2020 (GARCH vs calibrated VIX)")
+    out = _out(args)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "horizons.md").write_text(text, encoding="utf8")
+    print(text)
+    if args.freeze:
+        horizons.freeze(result, periods.DEV_YEARS)
+        print(f"frozen in {horizons.HORIZONS_FILE}: horizons shown = "
+              + ", ".join(h for h, r in sorted(result.items(), key=lambda kv: int(kv[0])) if r["valid"]))
+
+
+def horizons_holdout(args) -> None:
+    from .evaluation import periods
+    from .forecasting import horizons, serving
+    record = horizons.load_record()
+    if record is None:
+        raise SystemExit("no frozen horizons: run evaluate-horizons --freeze first")
+    if record.get("holdout") and not args.force:
+        raise SystemExit("the horizons holdout has already been scored (--force re-runs it; the re-run is recorded)")
+    with psycopg2.connect(args.database_url) as conn:
+        data = serving.horizon_data(conn)
+    years = periods.holdout_years(pd_year(data.dates[-1]))
+    result = horizons.evaluate(horizons.walk_forward(data, years, log=print))
+    text = horizons.report(result, f"Expiry forecasts by horizon, holdout {years[0]}-{years[-1]} (scored once)")
+    _out(args).mkdir(parents=True, exist_ok=True)
+    (_out(args) / "horizons_holdout.md").write_text(text, encoding="utf8")
+    horizons.record_holdout(result, years, force=args.force)
+    print(text)
+
+
+def pd_year(day) -> int:
+    import pandas as pd
+    return pd.Timestamp(day).year
+
+
+def backfill_expiry_forecasts(args) -> None:
+    from .forecasting import serving
+    with psycopg2.connect(args.database_url) as conn:
+        n = serving.backfill_expiries(conn)
+    print(f"stored {n} backfilled expiry forecasts (2021 on, walk-forward with yearly refits)")
 
 
 def oi_levels(args) -> None:
@@ -228,6 +338,7 @@ def main(argv=None) -> None:
     p.add_argument("--database-url", **db)
     p.add_argument("--models", action="store_true", help="baselines + models on the development years (2014-2020)")
     p.add_argument("--groups", help="with --models: feature groups for the models, e.g. vix,options,vix_term")
+    p.add_argument("--research", action="store_true", help="with --models: add Chronos-2 (needs .[research])")
     p.add_argument("--first-test-year", type=int, default=2014, help="baselines only: first test year")
     p.add_argument("--out", help="report folder (default: data/ml/reports at the repo root)")
     p.set_defaults(run=evaluate)
@@ -240,12 +351,40 @@ def main(argv=None) -> None:
 
     p = sub.add_parser("freeze", help="record the development-period choice before the holdout")
     p.add_argument("--database-url", **db)
-    p.add_argument("--model", required=True, choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile"])
+    p.add_argument("--model", required=True, choices=["ridge_sigma", "gbm_sigma", "ebm_sigma", "gbm_quantile", "chronos2", "chronos2_cov", "vix_scaled"])
     p.add_argument("--groups", required=True, help="comma-separated feature groups, e.g. vix,vix_term,options")
     p.add_argument("--conformal", action="store_true", help="add per-regime conformal calibration")
     p.add_argument("--reference", default="vix_scaled", help="baseline to beat, e.g. garch+conformal")
     p.add_argument("--reason", default="", help="one line on why (recorded)")
     p.set_defaults(run=freeze)
+
+    p = sub.add_parser("backfill-forecasts", help="store the 2021+ walk-forward forecasts as monitoring history")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=backfill_forecasts)
+
+    p = sub.add_parser("refresh-forecasts", help="rebuild the dataset and forecast any new week (as the scheduler does)")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=refresh_forecasts)
+
+    p = sub.add_parser("evaluate-horizons", help="expiry forecasts 1-10 sessions ahead on 2014-2020; --freeze records the gate")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--out", help="report folder (default: data/ml/reports at the repo root)")
+    p.add_argument("--freeze", action="store_true", help="write services/ml/horizons.json")
+    p.set_defaults(run=evaluate_horizons)
+
+    p = sub.add_parser("horizons-holdout", help="score the frozen horizons on 2021 on, once")
+    p.add_argument("--database-url", **db)
+    p.add_argument("--out", help="report folder")
+    p.add_argument("--force", action="store_true", help="run again although it has run (the re-run is recorded)")
+    p.set_defaults(run=horizons_holdout)
+
+    p = sub.add_parser("backfill-expiry-forecasts", help="store 2021+ expiry forecasts as monitoring history")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=backfill_expiry_forecasts)
+
+    p = sub.add_parser("explain-backfill", help="add explanations to live forecasts stored before ML-6")
+    p.add_argument("--database-url", **db)
+    p.set_defaults(run=explain_backfill)
 
     p = sub.add_parser("holdout", help="score the frozen choice on 2021 onwards, once")
     p.add_argument("--database-url", **db)

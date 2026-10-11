@@ -34,6 +34,7 @@ class PaperLegState(BaseModel):
     side: Literal["BUY", "SELL"]
     entry_price: Optional[float]
     current_price: Optional[float]
+    exit_price: Optional[float] = None
     pnl: float
 
 
@@ -46,3 +47,44 @@ class PaperTradeResponse(BaseModel):
     current_notional: float
     pnl: float
     legs: List[PaperLegState]
+    status: Literal["open", "closed"] = "open"
+    expiry: Optional[date] = None
+    settles_at: Optional[datetime] = Field(default=None, description="when an open trade is auto-settled (30 min before the close)")
+    closed_at: Optional[datetime] = None
+    close_reason: Optional[str] = None
+    capital_held: Optional[float] = Field(default=None, description="max loss (defined risk) or margin, open trades only")
+    capital_basis: Optional[str] = None
+
+
+class CapitalLeg(BaseModel):
+    strike: float
+    option_type: Literal["CALL", "PUT"]
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(gt=0)
+    entry_price: float
+
+
+class CapitalTrade(BaseModel):
+    legs: List[CapitalLeg]
+
+
+class CapitalScenario(BaseModel):
+    spot: float = Field(gt=0)
+    marks: List[List[Optional[float]]] = Field(description="per trade, per leg: the option's value in this scenario")
+
+
+class CapitalRequest(BaseModel):
+    trades: List[CapitalTrade]
+    scenarios: List[CapitalScenario]
+
+
+class PaperAccount(BaseModel):
+    starting_balance: float
+    realised_pnl: float
+    unrealised_pnl: float
+    total_pnl: float
+    account_value: float
+    capital_held: float
+    available: float
+    open_trades: int
+    closed_trades: int

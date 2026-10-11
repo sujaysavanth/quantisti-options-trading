@@ -133,7 +133,7 @@ class Garch(SigmaBaseline):
     def _filter(self, r: np.ndarray) -> np.ndarray:
         e = np.nan_to_num(r - self.mu)
         h = np.empty(len(r))
-        h_prev = np.nanvar(r)
+        h_prev = np.nanvar(r[:61])          # starting value from the first returns only: no look-ahead
         for i in range(len(r)):
             h_prev = self.omega + self.alpha * e[i] ** 2 + self.beta_ * h_prev
             h[i] = h_prev

@@ -65,17 +65,35 @@ services:
     build: ./services/portfolio
     environment:
       - PORT=8083
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
+      - SIMULATOR_URL=http://simulator:8082
+      - MARKET_STREAM_URL=http://market_stream:8090
     ports:
       - "8083:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      simulator:
+        condition: service_started
 
   stats:
     build: ./services/stats
     environment:
       - PORT=8084
-      - DATABASE_URL=${DATABASE_URL:-}
+      - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
+      - PORTFOLIO_URL=http://portfolio:8083
+      - SIMULATOR_URL=http://simulator:8082
+      - MARKET_STREAM_URL=http://market_stream:8090
+      - ML_URL=http://ml:8085
     ports:
       - "8084:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      portfolio:
+        condition: service_started
+      simulator:
+        condition: service_started
 
   ml:
     build: ./services/ml
@@ -83,6 +101,14 @@ services:
       - PORT=8085
       - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
       - MARKET_SERVICE_URL=http://market:8081
+      - FORECAST_SCHEDULER_ENABLED=true   # forecast each new week after its Friday close
+      # The service's own MLflow store (the CLI on your machine uses data/ml/mlflow.db): MLflow keeps absolute
+      # file paths, which differ between Windows and the container. Browse with
+      # mlflow ui --backend-store-uri sqlite:///data/ml/mlflow-service.db
+      - MLFLOW_TRACKING_URI=sqlite:////app/data/ml/mlflow-service.db
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}  # stamped on tracked runs: $env:GIT_COMMIT = git rev-parse HEAD before `up`
+    volumes:
+      - ./data/ml:/app/data/ml
     ports:
       - "8085:8085"
     depends_on:

@@ -12,7 +12,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-from psycopg2.extras import RealDictCursor, execute_values
+from psycopg2.extras import Json, RealDictCursor, execute_values
 
 from . import features as F
 from . import labels as L
@@ -96,6 +96,8 @@ def _clean(value):
     """numpy/NaN -> plain Python for psycopg2."""
     if value is None or (isinstance(value, float) and np.isnan(value)):
         return None
+    if isinstance(value, dict):
+        return Json(value)
     if isinstance(value, np.integer):
         return int(value)
     if isinstance(value, np.floating):
@@ -138,6 +140,85 @@ def read_latest(conn, symbol: str) -> Optional[dict]:
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("SELECT * FROM weekly_features WHERE symbol = %s ORDER BY week_start_date DESC LIMIT 1", (symbol,))
         return cur.fetchone()
+
+
+FORECAST_COLUMNS = ("anchor_date", "expiry_date", "method", "role", "origin", "spot", "vix_close",
+                    "q05", "q10", "q50", "q90", "q95", "trained_through", "details", "explanation")
+
+
+def save_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
+    """Insert forecasts; an anchor + method that already has one is left as it was (forecasts are made once)."""
+    forecasts = forecasts.assign(**{c: None for c in FORECAST_COLUMNS if c not in forecasts.columns})
+    rows = [tuple(_clean(v) for v in (symbol, *r)) for r in forecasts[list(FORECAST_COLUMNS)].itertuples(index=False)]
+    if not rows:
+        return 0
+    with conn.cursor() as cur:
+        # RETURNING + fetch: cur.rowcount would only count execute_values' last page of 100 rows
+        inserted = execute_values(cur, f"""
+            INSERT INTO weekly_forecasts (symbol, {", ".join(FORECAST_COLUMNS)}) VALUES %s
+            ON CONFLICT (symbol, anchor_date, method) DO NOTHING RETURNING 1""", rows, fetch=True)
+        return len(inserted)
+
+
+def save_explanation(conn, anchor: date, method: str, explanation: dict, symbol: str = SYMBOL) -> int:
+    """Store an explanation for a forecast that has none (an existing one is never replaced)."""
+    with conn.cursor() as cur:
+        cur.execute("""UPDATE weekly_forecasts SET explanation = %s
+                       WHERE symbol = %s AND anchor_date = %s AND method = %s AND explanation IS NULL""",
+                    (Json(explanation), symbol, anchor, method))
+        return cur.rowcount
+
+
+def forecast_anchors(conn, symbol: str = SYMBOL) -> set:
+    """Anchors that already have a forecast from every method."""
+    with conn.cursor() as cur:
+        cur.execute("""SELECT anchor_date FROM weekly_forecasts WHERE symbol = %s GROUP BY anchor_date
+                       HAVING count(*) >= 3""", (symbol,))
+        return {r[0] for r in cur.fetchall()}
+
+
+def read_forecasts(conn, symbol: str = SYMBOL, anchor: Optional[date] = None) -> pd.DataFrame:
+    """Stored forecasts with their outcomes (close_ret is empty until the following week has closed)."""
+    where, params = ("AND f.anchor_date = %s", (symbol, anchor)) if anchor else ("", (symbol,))
+    return _frame(conn, f"""
+        SELECT f.*, l.close_ret
+        FROM weekly_forecasts f
+        LEFT JOIN weekly_labels l ON l.symbol = f.symbol AND l.anchor_date = f.anchor_date
+        WHERE f.symbol = %s {where}
+        ORDER BY f.anchor_date, f.method""", params)
+
+
+EXPIRY_FORECAST_COLUMNS = ("origin_date", "expiry_date", "sessions", "method", "origin", "spot", "vix_close",
+                           "q05", "q10", "q50", "q90", "q95", "sigma", "z", "variance_path", "path_dates", "trained_through")
+
+
+def save_expiry_forecasts(conn, forecasts: pd.DataFrame, symbol: str = SYMBOL) -> int:
+    """Insert expiry forecasts; an origin + expiry that already has one is left as it was."""
+    if forecasts.empty:
+        return 0
+    rows = [tuple(_clean(v) for v in (symbol, *r)) for r in forecasts[list(EXPIRY_FORECAST_COLUMNS)].itertuples(index=False)]
+    with conn.cursor() as cur:
+        inserted = execute_values(cur, f"""
+            INSERT INTO expiry_forecasts (symbol, {", ".join(EXPIRY_FORECAST_COLUMNS)}) VALUES %s
+            ON CONFLICT (symbol, origin_date, expiry_date, method) DO NOTHING RETURNING 1""", rows, page_size=1000, fetch=True)
+        return len(inserted)
+
+
+def expiry_origins(conn, symbol: str = SYMBOL) -> set:
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT origin_date FROM expiry_forecasts WHERE symbol = %s", (symbol,))
+        return {r[0] for r in cur.fetchall()}
+
+
+def read_expiry_forecasts(conn, symbol: str = SYMBOL, origin: Optional[date] = None) -> pd.DataFrame:
+    """Stored expiry forecasts with outcomes: close_ret = ln(close at expiry / origin close), empty until then."""
+    where, params = ("AND f.origin_date = %s", (symbol, origin)) if origin else ("", (symbol,))
+    return _frame(conn, f"""
+        SELECT f.*, ln(u.close / f.spot) AS close_ret
+        FROM expiry_forecasts f
+        LEFT JOIN underlying_daily u ON u.symbol = f.symbol AND u.date = f.expiry_date
+        WHERE f.symbol = %s {where}
+        ORDER BY f.origin_date, f.expiry_date""", params)
 
 
 CHAIN_COLUMNS = ["anchor_date", "expiry_date", "source", "strike", "option_type", "bid", "ask",
