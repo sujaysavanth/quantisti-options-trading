@@ -1,12 +1,21 @@
 [project]
 name = "portfolio"
 version = "0.1.0"
-description = "Portfolio management service for the Quantisti options trading platform"
+description = "Portfolio service for the Quantisti options trading platform: positions, snapshots, trade history"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi",
-    "uvicorn",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "psycopg2-binary>=2.9.9",
+    "httpx>=0.25.0",
+    "pandas>=2.1.0",
+    "exchange_calendars>=4.5",
 ]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
 
 [build-system]
 requires = ["setuptools", "wheel"]
