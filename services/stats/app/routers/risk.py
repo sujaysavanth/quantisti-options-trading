@@ -1,13 +1,21 @@
 """Risk endpoints for the paper portfolio.
 
     GET /v1/risk/greeks    delta, gamma, vega, theta in dollars: totals, by expiry and per position
-    GET /v1/risk/stress    P&L and capital after SPX x IV x time shocks, and replays of the largest SPX days
+    GET  /v1/risk/stress        P&L and capital after SPX x IV x time shocks, and replays of the largest SPX days
+    GET  /v1/risk/var           1-day VaR and expected shortfall now, 95% / 99%, three methods
+    GET  /v1/risk/var/history   stored VaR per session with the realised next-day P&L, breaches, Kupiec, Christoffersen
+    POST /v1/risk/var/run       store this session's VaR if it is due (the background task does this after each close)
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from datetime import date, datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .. import clients, market_spec
 from ..services import stress as st
+from ..services import var as var_maths
+from ..services import var_run
 from ..services.exposure import Market, portfolio_greeks
 
 router = APIRouter(prefix="/v1/risk", tags=["risk"])
@@ -60,3 +68,32 @@ async def risk_stress(falls: int = Query(10, ge=0, le=50), rises: int = Query(5,
         "summary": {"grid": st.summary(rows[:len(grid)]), "historical": st.summary(rows[len(grid):])},
         "capital_available": held is not None, "history_available": bool(days), "unpriced": unpriced,
     }
+
+
+@router.get("/var", summary="1-day VaR and expected shortfall of the open paper trades")
+async def risk_var():
+    result = await var_run.current()
+    if result is None:
+        raise HTTPException(status_code=503, detail="Simulator or live SPX quote unavailable.")
+    if not result["methods"]:
+        raise HTTPException(status_code=503, detail="No SPX history in underlying_daily.")
+    return result
+
+
+@router.get("/var/history", summary="Stored VaR, realised next-day P&L and the backtests")
+async def risk_var_history(request: Request, start: Optional[date] = None, end: Optional[date] = None):
+    rows = request.app.state.var_store.list(start, end)
+    closes = await clients.portfolio_closes()
+    realised = var_run.realised_next(closes or [])
+    for r in rows:
+        r["realised_next_day"] = realised.get(r["session"])
+        r["breach"] = None if r["realised_next_day"] is None else -r["realised_next_day"] > r["var"]
+    return {"rows": rows, "portfolio_available": closes is not None, **var_maths.backtest(rows, realised),
+            "note": "Realised P&L is the change between consecutive close snapshots, so it also includes trades "
+                    "opened or closed that day. Kupiec and Christoffersen need ~250 days at 99% to say much."}
+
+
+@router.post("/var/run", summary="Store this session's VaR if it is due")
+async def risk_var_run(request: Request):
+    return {"due": var_run.due_close(datetime.now(timezone.utc)),
+            "rows_written": await var_run.store_due(request.app.state.var_store)}

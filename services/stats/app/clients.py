@@ -1,5 +1,6 @@
 """HTTP clients for the portfolio service (net positions), the simulator (open trades, account, capital rules) and
-market-stream (live SPX quote), plus reads from Postgres (latest T-bill rate, extreme SPX days). Each returns None
+market-stream (live SPX quote), ml (GARCH next-session volatility), plus reads from Postgres (latest T-bill rate,
+SPX / VIX daily moves). Each returns None
 when its source is unavailable."""
 
 import logging
@@ -106,3 +107,43 @@ def extreme_days(falls: int, rises: int) -> Optional[list]:
                      "vix_change": None if r["vix_change"] is None else float(r["vix_change"])} for r in cur.fetchall()]
     finally:
         return_db_connection(conn)
+
+
+DAILY_MOVES_SQL = """
+SELECT date, spx_return, vix_change FROM (
+    SELECT u.date, u.close / LAG(u.close) OVER (ORDER BY u.date) - 1 AS spx_return,
+           v.close - LAG(v.close) OVER (ORDER BY u.date) AS vix_change
+    FROM underlying_daily u LEFT JOIN vix_daily v ON v.date = u.date
+    WHERE u.symbol = 'SPX'
+) r WHERE spx_return IS NOT NULL ORDER BY date
+"""
+
+
+def daily_moves() -> Optional[list]:
+    """Every SPX daily return with that day's VIX change in points (0 when VIX is missing), oldest first."""
+    try:
+        conn = get_db_connection()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("no database for history: %s", exc)
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(DAILY_MOVES_SQL)
+            return [(float(r["spx_return"]), float(r["vix_change"] or 0.0)) for r in cur.fetchall()]
+    finally:
+        return_db_connection(conn)
+
+
+async def garch_next_sigma() -> Optional[tuple]:
+    """(sigma of the next session's log return, the forecast's origin session) from the ml expiry forecasts."""
+    body = await _get(f"{get_settings().ML_URL.rstrip('/')}/v1/predict/expiries")
+    for row in (body or {}).get("expiries", []):
+        path = row.get("variance_path")
+        if path:
+            return float(path[0]) ** 0.5, body.get("origin_date")
+    return None
+
+
+async def portfolio_closes() -> Optional[list]:
+    body = await _get(f"{get_settings().PORTFOLIO_URL.rstrip('/')}/v1/portfolio/equity?kind=close")
+    return None if body is None else body["snapshots"]

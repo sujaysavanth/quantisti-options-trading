@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     MARKET_STREAM_URL: str = os.getenv("MARKET_STREAM_URL", "http://market_stream:8090")
     # Open trades, the account and the capital rules (stress tests) come from the simulator, which owns them.
     SIMULATOR_URL: str = os.getenv("SIMULATOR_URL", "http://simulator:8082")
+    # The ml service's GARCH forecast sets today's volatility for filtered historical VaR (EWMA if unavailable).
+    ML_URL: str = os.getenv("ML_URL", "http://ml:8085")
+
+    VAR_STORE_ENABLED: bool = True          # store each session's VaR after the close (for the backtests)
+    VAR_CHECK_SECONDS: int = 60
 
     class Config:
         env_file = ".env"
