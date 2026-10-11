@@ -112,3 +112,28 @@ def test_max_loss_is_fixed_at_entry_but_naked_margin_follows_the_market():
     assert rules.capital_held(spread, 6830)["amount"] == pytest.approx(2000)          # the debit paid, not today's
     naked = Position(6700, "PUT", "SELL", 1, 10, mark=25)                              # the put has gained value
     assert rules.capital_held([naked], 6800)["amount"] == pytest.approx((25 + 920) * 100 - 1_000)
+
+
+def test_capital_held_scenarios_follow_spot_and_marks_for_naked_shorts_only():
+    from app.models.paper import CapitalRequest
+    spread = {"legs": [{"strike": 6800, "option_type": "CALL", "side": "BUY", "quantity": 1, "entry_price": 40},
+                       {"strike": 6850, "option_type": "CALL", "side": "SELL", "quantity": 1, "entry_price": 20}]}
+    naked = {"legs": [{"strike": 6700, "option_type": "PUT", "side": "SELL", "quantity": 1, "entry_price": 10}]}
+    body = CapitalRequest(trades=[spread, naked], scenarios=[
+        {"spot": 6800, "marks": [[40, 20], [10]]},
+        {"spot": 6460, "marks": [[0.5, 0.1], [250]]}])                  # SPX -5%: the short put is 240 ITM
+    calm, crash = paper.capital_held_scenarios(body)["scenarios"]
+    assert calm["by_trade"][0] == crash["by_trade"][0] == {"amount": pytest.approx(2000), "basis": "max loss"}
+    assert calm["by_trade"][1]["amount"] == pytest.approx(93_000 - 1_000)
+    # crash: 250 + max(15% x 6460 - 0, 10% x 6700) = 250 + 969 = 1219 pts, less the 10 received
+    assert crash["by_trade"][1]["amount"] == pytest.approx(121_900 - 1_000)
+    assert crash["capital_held"] == pytest.approx(2000 + 120_900)
+
+
+def test_capital_held_scenarios_reject_mismatched_marks():
+    from fastapi import HTTPException
+    from app.models.paper import CapitalRequest
+    body = CapitalRequest(trades=[{"legs": [{"strike": 6800, "option_type": "CALL", "side": "BUY", "quantity": 1,
+                                             "entry_price": 40}]}], scenarios=[{"spot": 6800, "marks": [[40, 1]]}])
+    with pytest.raises(HTTPException):
+        paper.capital_held_scenarios(body)

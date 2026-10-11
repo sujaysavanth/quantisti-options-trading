@@ -1,5 +1,6 @@
-"""HTTP clients for the portfolio service (net positions) and market-stream (live SPX quote), and the latest
-T-bill rate from Postgres. Each returns None when its source is unavailable."""
+"""HTTP clients for the portfolio service (net positions), the simulator (open trades, account, capital rules) and
+market-stream (live SPX quote), plus reads from Postgres (latest T-bill rate, extreme SPX days). Each returns None
+when its source is unavailable."""
 
 import logging
 from typing import Any, Optional
@@ -23,6 +24,36 @@ async def _get(url: str) -> Optional[Any]:
         return None
 
 
+async def _post(url: str, body: dict) -> Optional[Any]:
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=body, timeout=30.0)
+            response.raise_for_status()
+            return response.json()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("POST %s failed: %s", url, exc)
+        return None
+
+
+def _simulator(path: str) -> str:
+    return f"{get_settings().SIMULATOR_URL.rstrip('/')}{path}"
+
+
+async def open_trades() -> Optional[list]:
+    trades = await _get(_simulator("/v1/paper/orders"))
+    return None if trades is None else [t for t in trades if t["status"] == "open"]
+
+
+async def account() -> Optional[dict]:
+    return await _get(_simulator("/v1/paper/account"))
+
+
+async def capital_held(body: dict) -> Optional[list]:
+    """Total capital held per scenario, from the simulator's rules."""
+    out = await _post(_simulator("/v1/paper/capital-held"), body)
+    return None if out is None else [s["capital_held"] for s in out["scenarios"]]
+
+
 async def positions() -> Optional[list]:
     body = await _get(f"{get_settings().PORTFOLIO_URL.rstrip('/')}/v1/portfolio/positions")
     return None if body is None else body["positions"]
@@ -44,5 +75,34 @@ def latest_rate() -> Optional[float]:
             cur.execute("SELECT rate FROM rates_daily ORDER BY date DESC LIMIT 1")
             row = cur.fetchone()
             return float(row["rate"]) if row else None
+    finally:
+        return_db_connection(conn)
+
+
+EXTREME_DAYS_SQL = """
+WITH r AS (
+    SELECT u.date, u.close / LAG(u.close) OVER (ORDER BY u.date) - 1 AS spx_return,
+           v.close - LAG(v.close) OVER (ORDER BY u.date) AS vix_change
+    FROM underlying_daily u LEFT JOIN vix_daily v ON v.date = u.date
+    WHERE u.symbol = 'SPX'
+)
+(SELECT date, spx_return, vix_change FROM r WHERE spx_return IS NOT NULL ORDER BY spx_return LIMIT %s)
+UNION ALL
+(SELECT date, spx_return, vix_change FROM r WHERE spx_return IS NOT NULL ORDER BY spx_return DESC LIMIT %s)
+"""
+
+
+def extreme_days(falls: int, rises: int) -> Optional[list]:
+    """The largest SPX daily falls, then rises, in underlying_daily, with that day's VIX change in points."""
+    try:
+        conn = get_db_connection()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("no database for history: %s", exc)
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute(EXTREME_DAYS_SQL, (falls, rises))
+            return [{"date": r["date"], "spx_return": float(r["spx_return"]),
+                     "vix_change": None if r["vix_change"] is None else float(r["vix_change"])} for r in cur.fetchall()]
     finally:
         return_db_connection(conn)

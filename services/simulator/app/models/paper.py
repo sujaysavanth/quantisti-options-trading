@@ -56,6 +56,28 @@ class PaperTradeResponse(BaseModel):
     capital_basis: Optional[str] = None
 
 
+class CapitalLeg(BaseModel):
+    strike: float
+    option_type: Literal["CALL", "PUT"]
+    side: Literal["BUY", "SELL"]
+    quantity: int = Field(gt=0)
+    entry_price: float
+
+
+class CapitalTrade(BaseModel):
+    legs: List[CapitalLeg]
+
+
+class CapitalScenario(BaseModel):
+    spot: float = Field(gt=0)
+    marks: List[List[Optional[float]]] = Field(description="per trade, per leg: the option's value in this scenario")
+
+
+class CapitalRequest(BaseModel):
+    trades: List[CapitalTrade]
+    scenarios: List[CapitalScenario]
+
+
 class PaperAccount(BaseModel):
     starting_balance: float
     realised_pnl: float

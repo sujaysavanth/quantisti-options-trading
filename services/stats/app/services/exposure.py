@@ -18,8 +18,9 @@ Position figures are in dollars for the signed quantity (+ long, - short), x100 
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from .. import market_spec
 from .pricing import greeks
@@ -54,35 +55,60 @@ def _zero() -> Dict[str, float]:
     return {f: 0.0 for f in FIELDS}
 
 
+@dataclass(frozen=True)
+class LegInputs:
+    """What a contract is priced from: its expiry's implied spot and time, and an IV."""
+    spot: float
+    T: float
+    iv: float
+    iv_source: str
+    as_of: datetime
+    mid: Optional[float]
+
+
+class Market:
+    """The live quote, indexed for pricing contracts at each expiry's own moment (see the module docstring)."""
+
+    def __init__(self, quote: Mapping[str, Any], rate: float):
+        self.rate = rate
+        self.spot = float(quote["last_price"])
+        self.quoted_at = quote.get("quoted_at")
+        self.summaries = {e["expiry"]: e for e in quote.get("expiries", [])}
+        self.legs: Dict[str, List[Mapping[str, Any]]] = {}
+        for leg in quote.get("legs", []):
+            self.legs.setdefault(leg["expiry"], []).append(leg)
+
+    def inputs(self, expiry: str, strike: float, option_type: str) -> Union[LegInputs, str]:
+        """LegInputs, or the reason the contract can't be priced."""
+        summary = self.summaries.get(expiry)
+        if summary is None:
+            return "expiry not on the live quote (settled or not collected)"
+        iv, iv_source, own = _iv(self.legs.get(expiry, []), strike, option_type)
+        if iv is None:
+            return "no implied vol in this expiry"
+        as_of = _parse(summary.get("quoted_at") or self.quoted_at)
+        T = market_spec.year_fraction(as_of, date.fromisoformat(expiry))
+        forward = summary.get("forward")
+        s = forward * math.exp(-(self.rate - market_spec.DIVIDEND_YIELD) * T) if forward else self.spot
+        return LegInputs(s, T, iv, iv_source, as_of, _mid(own) if own else None)
+
+
 def portfolio_greeks(positions: Sequence[Mapping[str, Any]], quote: Mapping[str, Any], rate: float) -> Dict[str, Any]:
-    q = market_spec.DIVIDEND_YIELD
-    spot = float(quote["last_price"])
-    pct = spot / 100
-    summaries = {e["expiry"]: e for e in quote.get("expiries", [])}
-    legs_by_expiry: Dict[str, List[Mapping[str, Any]]] = {}
-    for leg in quote.get("legs", []):
-        legs_by_expiry.setdefault(leg["expiry"], []).append(leg)
+    market = Market(quote, rate)
+    pct = market.spot / 100
 
     rows, unpriced = [], []
     totals, by_expiry = _zero(), {}
     for pos in positions:
         expiry, strike, kind, qty = str(pos["expiry"]), float(pos["strike"]), pos["option_type"], int(pos["quantity"])
-        summary = summaries.get(expiry)
-        if summary is None:
-            unpriced.append({**_key(pos), "reason": "expiry not on the live quote (settled or not collected)"})
+        x = market.inputs(expiry, strike, kind)
+        if isinstance(x, str):
+            unpriced.append({**_key(pos), "reason": x})
             continue
-        iv, iv_source, own = _iv(legs_by_expiry.get(expiry, []), strike, kind)
-        if iv is None:
-            unpriced.append({**_key(pos), "reason": "no implied vol in this expiry"})
-            continue
-        as_of = _parse(summary.get("quoted_at") or quote["quoted_at"])
-        T = market_spec.year_fraction(as_of, date.fromisoformat(expiry))
-        forward = summary.get("forward")
-        s = forward * math.exp(-(rate - q) * T) if forward else spot
-        g = greeks(s, strike, T, rate, iv, q, kind)
+        g = greeks(x.spot, strike, x.T, rate, x.iv, market_spec.DIVIDEND_YIELD, kind)
         size = qty * MULTIPLIER
-        row = {**_key(pos), "iv": iv, "iv_source": iv_source, "spot": round(s, 2), "as_of": as_of,
-               "days_to_expiry": T * 365, "model_price": g.price, "mid": _mid(own) if own else None,
+        row = {**_key(pos), "iv": x.iv, "iv_source": x.iv_source, "spot": round(x.spot, 2), "as_of": x.as_of,
+               "days_to_expiry": x.T * 365, "model_price": g.price, "mid": x.mid,
                "delta_per_contract": g.delta,
                "delta": g.delta * size, "gamma": g.gamma * size, "vega": g.vega * size, "theta": g.theta * size,
                "delta_1pct": g.delta * size * pct, "gamma_1pct": 0.5 * g.gamma * size * pct * pct}
@@ -93,9 +119,9 @@ def portfolio_greeks(positions: Sequence[Mapping[str, Any]], quote: Mapping[str,
             totals[f] += row[f]
 
     return {
-        "spot": spot,
+        "spot": market.spot,
         "rate": rate,
-        "quoted_at": quote.get("quoted_at"),
+        "quoted_at": market.quoted_at,
         "totals": totals,
         "by_expiry": [{"expiry": e, **v} for e, v in sorted(by_expiry.items())],
         "positions": rows,

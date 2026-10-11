@@ -5,6 +5,7 @@
     POST   /v1/paper/orders/{id}/close   close an open trade now at the mids
     DELETE /v1/paper/orders/{id}         remove an open trade entered by mistake (closed trades are kept)
     GET    /v1/paper/account             $30,000 start, realised / unrealised / total P&L, capital held, available
+    POST   /v1/paper/capital-held        capital the given trades would hold in each hypothetical market (stress tests)
 
 Open trades are settled SETTLE_BEFORE their expiry's close by settle_due(), which main.py runs every minute.
 Rules: app/services/paper_settlement.py.
@@ -19,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from ..config import get_settings
 from ..dependencies import get_market_stream_client, get_paper_store
-from ..models.paper import PaperAccount, PaperLegInput, PaperLegState, PaperTradeCreate, PaperTradeResponse
+from ..models.paper import CapitalRequest, PaperAccount, PaperLegInput, PaperLegState, PaperTradeCreate, PaperTradeResponse
 from ..services import paper_settlement as rules
 from ..services.market_stream_client import MarketStreamClient
 from ..services.paper_store import PaperTradeStore, StoredLeg, StoredTrade
@@ -174,6 +175,24 @@ async def paper_account(
     quote_client: MarketStreamClient = Depends(get_market_stream_client)
 ):
     return account_summary(store, await _all_responses(store, quote_client))
+
+
+@router.post("/capital-held", summary="Capital the given trades would hold in hypothetical markets")
+def capital_held_scenarios(payload: CapitalRequest):
+    """For each scenario (an index level and every leg's value), the capital each trade would hold under the
+    account's rules: max loss at entry prices for defined risk, CBOE margin at the scenario's spot and marks for
+    uncovered shorts. The stats service's stress tests call this so the rules live only here."""
+    out = []
+    for scenario in payload.scenarios:
+        if len(scenario.marks) != len(payload.trades) or any(
+                len(m) != len(t.legs) for m, t in zip(scenario.marks, payload.trades)):
+            raise HTTPException(status_code=422, detail="marks must have one list per trade and one value per leg")
+        by_trade = [rules.capital_held([rules.Position(leg.strike, leg.option_type, leg.side, leg.quantity,
+                                                       leg.entry_price, mark) for leg, mark in zip(t.legs, marks)],
+                                       scenario.spot)
+                    for t, marks in zip(payload.trades, scenario.marks)]
+        out.append({"capital_held": sum(h["amount"] for h in by_trade), "by_trade": by_trade})
+    return {"scenarios": out}
 
 
 @router.get("/orders/{trade_id}", response_model=PaperTradeResponse, summary="Get trade by ID")

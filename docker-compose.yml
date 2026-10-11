@@ -82,6 +82,7 @@ services:
       - PORT=8084
       - DATABASE_URL=postgresql://quantisti:quantisti@postgres:5432/quantisti
       - PORTFOLIO_URL=http://portfolio:8083
+      - SIMULATOR_URL=http://simulator:8082
       - MARKET_STREAM_URL=http://market_stream:8090
     ports:
       - "8084:8084"
@@ -89,6 +90,8 @@ services:
       postgres:
         condition: service_healthy
       portfolio:
+        condition: service_started
+      simulator:
         condition: service_started
 
   ml:

@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Positions come from the portfolio service (netted across paper trades), prices from market-stream.
     PORTFOLIO_URL: str = os.getenv("PORTFOLIO_URL", "http://portfolio:8083")
     MARKET_STREAM_URL: str = os.getenv("MARKET_STREAM_URL", "http://market_stream:8090")
+    # Open trades, the account and the capital rules (stress tests) come from the simulator, which owns them.
+    SIMULATOR_URL: str = os.getenv("SIMULATOR_URL", "http://simulator:8082")
 
     class Config:
         env_file = ".env"
