@@ -247,18 +247,18 @@ export const services = [
   { name: 'portfolio', port: 8083 },
   { name: 'stats', port: 8084 },
   { name: 'ml', port: 8085 },
-  { name: 'explain', port: 8086 },
+  { name: 'ingest', port: 8088 },
   { name: 'stream', port: 8090 },
 ]
 
 export const specs: { label: string; items: string[] }[] = [
-  { label: 'Services', items: ['8 FastAPI microservices', 'Health and readiness probes on every service', 'Docker Compose for local, Cloud Run for deploy'] },
+  { label: 'Services', items: ['8 FastAPI microservices', 'Health and readiness probes on every service', 'Docker Compose, Kafka and Spark streaming'] },
   { label: 'Market data', items: ['S&P 500 daily history via Yahoo Finance', 'CBOE VIX and FRED T-bill rates', 'Daily SPX chain snapshots, Black-Scholes when none exist'] },
   { label: 'Pricing', items: ['Black-Scholes-Merton for European, cash-settled SPX', 'IV recomputed from mid quotes against a parity-implied forward', 'VIX-anchored volatility smile and NYSE expiry calendar'] },
-  { label: 'Machine learning', items: ['Price, technical and volatility feature pipeline', 'XGBoost weekly range model', 'SHAP explanations per prediction'] },
+  { label: 'Machine learning', items: ['Point-in-time feature pipeline, walk-forward evaluation', 'GARCH weekly range forecast, chosen on a one-shot holdout', 'Variance breakdown and SHAP per forecast'] },
   { label: 'Simulation', items: ['10+ multi-leg strategy templates', 'Asynchronous backtest engine', 'Paper trading marked to live quotes'] },
-  { label: 'Risk', items: ['VaR and CVaR at 95%', 'Sharpe, Sortino, max drawdown', 'Win rate and payoff statistics'] },
+  { label: 'Risk', items: ['VaR and expected shortfall at 95% and 99%, backtested', 'Stress tests and portfolio Greeks', 'Sharpe, Sortino, max drawdown'] },
   { label: 'Storage', items: ['PostgreSQL 16', 'Versioned SQL schema', 'In-memory quote store for live ticks'] },
   { label: 'Frontend', items: ['Next.js, React, TypeScript', 'Tailwind CSS', 'Motion for scroll-driven animation'] },
-  { label: 'Delivery', items: ['GitHub Actions CI', 'Terraform', 'Google Cloud Run'] },
+  { label: 'Delivery', items: ['GitHub Actions CI, blocking', 'pytest, Vitest and ruff', 'Every service built as a Docker image'] },
 ]

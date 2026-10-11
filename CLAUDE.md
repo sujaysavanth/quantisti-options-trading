@@ -46,9 +46,9 @@ The dashboard reads `NEXT_PUBLIC_SIMULATOR_API` (default `http://localhost:8082`
 
 ## Architecture
 
-Ports: gateway 8080, market 8081, simulator 8082, portfolio 8083, stats 8084, ml 8085, explain 8086, market-stream 8090. Streaming stack: ingest **8088** on the host (8087 in the container; `INGEST_HOST_PORT`), Kafka UI 8089, Spark UI 4040, Kafka `localhost:9094` for host tools (`kafka:9092` inside compose). Every service exposes `/health/healthz` and `/health/readyz` (market-stream only `/health/healthz`), and FastAPI docs at `/docs`.
+Ports: gateway 8080, market 8081, simulator 8082, portfolio 8083, stats 8084, ml 8085, market-stream 8090. Streaming stack: ingest **8088** on the host (8087 in the container; `INGEST_HOST_PORT`), Kafka UI 8089, Spark UI 4040, Kafka `localhost:9094` for host tools (`kafka:9092` inside compose). Every service exposes `/health/healthz` and `/health/readyz` (market-stream only `/health/healthz`), and FastAPI docs at `/docs`.
 
-**Implemented** services (the rest — gateway, explain — are health-only stubs):
+**Implemented** services (gateway is a health-only stub; the explain stub was removed, explanations live in ml):
 
 - **market** — SPX data. `/v1/underlying/{spot,historical,candles/{period},vix}` read `underlying_daily` / `vix_daily` (`/spot` is deliberately the latest *close*: backtests and ml rely on it); `/v1/underlying/intraday?symbol=&interval=&date=` reads `intraday_bars`. `/v1/options/chain` returns `source: snapshot` (real quotes from `option_chain_snapshots`, one source per day by `SNAPSHOT_SOURCE_PRIORITY`; forward from put-call parity, IV recomputed from mids — vendor IV/spot are unreliable) or `source: synthetic` (Black-Scholes, VIX-anchored smile, FRED rate by date). While a session runs (no daily row yet), the default date is today and spot is the latest intraday bar (`spot_source`), and snapshots are priced at their `quoted_at` (`as_of`) — rules in `services/live.py`. `pcr` uses open interest, else volume (OptionsDX has no OI), labelled by `pcr_basis` (`model` for synthetic). Chain logic is pure functions in `services/chains.py`; `data_provider.py` does the DB reads. `/v1/options/expiries` follows the real listing history.
 - **`market_spec.py`** (in market, copied verbatim into simulator, ingest, ml, portfolio, stats and `stream-processing/jobs` — keep identical; `services/ingest/tests/test_market_spec_copy.py` checks) is the single source for contract rules and the expiry calendar (`exchange_calendars` XNYS): `round_to_strike`, `next_expiry(on, min_dte, offset)`, `valuation_time` (close of the day, or now if intraday), `year_fraction` to the 16:00 ET close (early closes included).
@@ -72,7 +72,7 @@ Service conventions: `app/main.py` wires routers; `app/config.py` is a pydantic-
 
 Free-data limits: chains are ~15 min delayed; 2024 until live collection started (2026-10-01) has no real chains (synthetic); Yahoo keeps 1m bars ~30 days, 5m 60 days, 1h ~2 years; OptionsDX lacks 43 sessions and all open interest. In Git Bash, prefix docker commands containing `/opt/...` with `MSYS_NO_PATHCONV=1`.
 
-`docs/architecture.md` and `docs/strategy-engine.md` describe the *target* design (Firebase auth, Cloud SQL, SHAP explain, sentiment scoring) — much of it is not built. `infra/` (Terraform, Cloud Run) is README-only.
+`docs/architecture.md` describes what is built (owners, dependencies) and keeps the original target design with a status table; `docs/strategy-engine.md` is the original multi-signal scoring design (not built). `docs/security-rbac.md` is still the unbuilt auth design (its `/explain/shap` route now belongs to ml). `infra/` (Terraform, Cloud Run) is README-only.
 
 ## Landing page work
 

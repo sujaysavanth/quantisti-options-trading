@@ -5,7 +5,7 @@ This document outlines the high-level DevOps workflow for the Quantisti options 
 ## Continuous Integration
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push to any branch and on pull requests. Every job is
 blocking; a newer push to the same branch cancels the older run.
-- **python-tests**: market, simulator, ml and ingest, each with `pip install -e ".[test]"` and `pytest -q`.
+- **python-tests**: market, simulator, ml, ingest, portfolio and stats, each with `pip install -e ".[test]"` and `pytest -q`.
 - **spark-tests**: builds the stream-processing image and runs its tests against a Postgres service container
   with `schema/sql` applied (`REQUIRE_POSTGRES=1`, so the database tests fail rather than skip).
 - **lint**: `ruff check services scripts` with the rules in `ruff.toml` (syntax errors and pyflakes).
